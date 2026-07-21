@@ -51,29 +51,40 @@ Data: `data/ercot/` (2025 DAM/RTM LMP + solar/wind production CSVs).
 - **Online (per 15-min step):** locate each agent's critical region at `[aggregate, θ_t]` (warm-started
   by the previous step's CR + its facet neighbours — an ~8× speedup over a full scan), solve the
   block-linear equilibrium via the min-potential (variational) selection, and iterate to a
-  self-consistent combination (a certified GNE). A 1-hop min-potential refinement then runs **only on
-  steps where the coupling binds** — where `M_x` is rank-deficient the GNE is non-unique and the
-  selection matters; on interior steps it is full rank, the GNE is unique, and the refinement is a
-  provable no-op (so it is skipped). **Rare fallback** (0.4% of steps, at the degenerate ceiling): a
-  warm-started distributed ADMM (ρ=0.002, ~27 rounds). Deployed: **1 broadcast + 1 local solve per step**.
+  self-consistent combination (a certified GNE); if that fails, BFS the facet-neighbour graph.
+  **Rare fallback** (0.4% of steps, at the degenerate ceiling): a warm-started distributed ADMM
+  (ρ=0.002, ~27 rounds). Deployed: **1 broadcast + 1 local solve per step**.
+- **This is pure FACET.** Two selection add-ons were measured and turned off (`AMRHG_MAX_NBR=0`,
+  `AMRHG_HALL_EQ16=0`); see the note below. What closes the gap to centralized is the min-potential
+  selection *inside the base solve*, not either add-on.
 - **Validation oracle:** centralized Gurobi QP (`rhg_online.centralized`), offline only.
 
-## Results (measured 2026-07-21; see `report/rhg_detailed_report.pdf`)
+## Results (measured 2026-07-21, pure FACET; see `report/rhg_detailed_report.pdf`)
 Two ERCOT weeks (1–7 Apr, 7–13 Jul 2025), 1344 real-time steps:
 - **99.6% iteration-free** (6/1344 fallbacks); **1.12 inter-agent rounds/step** vs a tuned ADMM's
   **67 rounds** for the same equilibrium.
-- **Median RTM step 4.1 ms** against the 900 s dispatch interval (mean 168 ms, p95 200 ms — the tail
-  is the binding-heavy days 04-07 and 07-07, where the refinement runs on most steps).
-- Matches the centralized equilibrium to ~10⁻⁴–10⁻⁶ kW in the interior; at the non-unique coupling
-  ceiling returns a certified GNE bounded to **9.1 kW worst case** (~1% of the 900 kW band).
-- Weekly H₂ target 140–141%; renewable curtailment 5.8–6.8%.
+- **Median RTM step 3.9 ms, p95 12.2 ms** against the 900 s dispatch interval. (Mean 119 ms: three
+  days carry an ADMM fallback whose 3-hop BFS runs long — a separate, known tail.)
+- Matches the centralized equilibrium to ~10⁻⁴–10⁻⁶ kW in the interior; at the degenerate coupling
+  boundary returns a certified GNE within **9.05 kW** (~1% of the 900 kW band).
+- Weekly H₂ target 140% (Apr) / 141% (Jul); renewable curtailment 5.8–6.8%.
 
-> **Note on the refinement.** It was cut entirely on 2026-07-18 (see
-> `docs/history/STATUS_solver_comparison.md`) after being measured as worth ≤0.05 kW — but that was on
-> the *incomplete* facet-neighbour graph. On the corrected `facet_crossing` graph (~15 neighbours/CR vs
-> ~7) it is worth ~14 kW → 9.1 kW worst case, so it was reinstated, gated on a binding coupling to keep
-> the median at ~4 ms. **The report's tables are not yet reconciled with this** — its Week-1/2 tables
-> predate the cut and its timing table postdates it.
+> **The 9.05 kW is equilibrium multiplicity, not solver error.** At the worst step (04-06 k=88) the
+> aggregate is pinned at L_min across the whole horizon, so the GNE set is a continuum. A direct
+> best-response test certifies **both** our point and the centralized point as exact GNEs (largest
+> profitable unilateral deviation 8e-15 and 6e-12; max|dev| 0.000 kW for all six agents) — they are
+> different members of the same equilibrium set, differing in coalition potential. Reaching the
+> oracle's member would need a *global* min-Φ over combinations, i.e. the K^N enumeration FACET
+> exists to avoid. It is a documented limit of the method, not an open defect. See `FORMULATION.md` §8.
+
+> **Note on the two selection add-ons — both OFF by default.** `AMRHG_MAX_NBR=0` disables the 1-hop
+> min-potential refinement: measured with Gurobi at every one of 480 April steps (`max_nbr` the only
+> variable) it leaves the worst case **identical at 9.052 kW**, helps 11/480 steps, hurts 0, and costs
+> p95 **12.2 → 200 ms**. Over the two weeks it changes only 07-07 (2.75 vs 6.48 kW) and 07-13 (1.59 vs
+> 1.64). `AMRHG_HALL_EQ16=0` disables the Eq. (16) certificate (fires on ~15% of steps, 2–4× worse).
+> An earlier session credited a 14 → 9.1 kW improvement to the refinement; that was wrong — two things
+> changed at once and the **base-solve** min-potential selection was doing the work.
+> **The report's tables are not yet reconciled with these numbers.**
 
 See `bench_solvers.py`/`report_bench.py` for the head-to-head vs ADMM (Douglas–Rachford implemented
 but dropped: it is centralized and violates the privacy model).

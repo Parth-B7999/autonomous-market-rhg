@@ -74,18 +74,42 @@ per-agent mpQP in private θ_i (PPOPT combinatorial_parallel)   simple_game/rhg_
   → online: locate CR per agent at [s, θ] → block-linear equilibrium solve (eliminates s),
             selecting the min-potential point on the manifold when M_x is rank-deficient
             (= variational GNE = social optimum; gne_combiner._solve_equilibrium select="potential")
-  → 1-hop min-potential refinement, ONLY when the coupling binds (interior steps have a unique
-            GNE, so refining there is a provable no-op)
+  → self-consistency iteration on the combination; facet-neighbour BFS if it fails
   → FACET neighbor-graph point-location (never enumerates K^N)  src/amrhg/solvers/facet_gne.py
 ```
+**This is pure FACET.** Two selection add-ons were evaluated and are OFF by default, kept in
+the tree behind env switches with their measurements recorded beside them:
+- `AMRHG_MAX_NBR` (default 0) — 1-hop min-potential refinement. Measured with Gurobi at every
+  one of 480 April steps, `max_nbr` the only variable: worst case **9.052 kW either way**,
+  helps 11/480 steps, hurts 0; over two weeks it costs p95 **12.2 → 200 ms**. Not worth it.
+- `AMRHG_HALL_EQ16` (default 0) — Hall & Bemporad Eq. (16) equal-multiplier certificate.
+  Fires on ~15% of steps and selects a different manifold point than the potential
+  minimiser; measured 2–4× further from centralized.
+
+The gap to centralized is closed by the min-potential selection **inside the base solve**,
+not by either add-on.
 Centralized QP (`rhg_online.centralized`, Gurobi) = **offline accuracy oracle only**.
 
 ## 8. Acceptance gate (met)
 `max |p_map − p_centralized| < 1e-3 kW` in the interior, zero lookup misses, single-valued.
-**Validated 2026-07-21:** 1–7 Apr and 7–13 Jul 2025 (1344 RTM steps) — interior match ~1e-4–1e-6 kW,
-1.12 inter-agent rounds/step, **99.6% iteration-free** (6/1344 warm-started ADMM fallbacks at the
-degenerate coupling ceiling, where the certified GNE can be non-variational, bounded to **9.1 kW**
-worst case ≈1% of the 900 kW band), H₂ 140–141%, median step 4.1 ms.
+**Validated 2026-07-21 (pure FACET, both add-ons off):** 1–7 Apr and 7–13 Jul 2025 (1344 RTM
+steps) — interior match ~1e-4–1e-6 kW, 1.12 inter-agent rounds/step, **99.6% iteration-free**
+(6/1344 warm-started ADMM fallbacks), H₂ 140% Apr / 141% Jul, **median step 3.9 ms, p95 12.2 ms**.
+
+**The 9.05 kW worst case is equilibrium multiplicity, not solver error — proven, not asserted.**
+At the worst step (2025-04-06, k=88) the coalition aggregate is pinned at L_min across all four
+horizon steps, so M_x is maximally rank-deficient and the GNE set is a continuum. A direct
+best-response test (each agent re-optimising against the others' fixed decisions) certifies that
+**both** our point and the centralized point are exact GNEs: largest profitable unilateral
+deviation 8e-15 (ours) and 6e-12 (centralized), max|dev| 0.000 kW for all six agents. They differ
+in coalition potential (−28.264 vs −28.536), i.e. the oracle selects a different member of the
+same equilibrium set.
+
+No 1-hop selection rule can reach the oracle's member: min-potential minimises Φ over the null
+space of ONE combination's manifold, and the centralized GNE lies in a different combination
+(agents 1, 3, 5 in other CRs, none in the facet-neighbour shell). Closing this residual would
+require a *global* min-Φ over combinations — precisely the K^N enumeration FACET exists to avoid.
+It is therefore a **documented limit of the approach**, not an open defect.
 
 ## 9. Scope (out)
 No batteries, no H₂ storage tanks, no ramp limits, no `{0}`-branch, no export — kept out to

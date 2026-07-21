@@ -26,12 +26,32 @@ from amrhg.solvers.admm_solver import admm_solve
 
 H = R.H
 
-# Equilibrium selection for RANK-DEFICIENT combinations (AMRHG_HALL_EQ16=0 to disable).
-#   True  — Hall & Bemporad Eq. (16): require every agent's coupling multiplier to agree
-#           (variational-GNE certificate); the combination is REJECTED when they cannot.
-#   False — min-norm point on the GNE manifold, i.e. the pre-Eq.(16) behaviour.
+# Equilibrium selection for RANK-DEFICIENT combinations (AMRHG_HALL_EQ16=1 to re-enable).
+#   False (DEFAULT) — `_solve_combo_vgne`: the MIN-POTENTIAL point on the GNE manifold,
+#           i.e. the variational GNE / social optimum, which is what the centralized
+#           reference computes.  This is the selection that closes the gap.
+#   True  — Hall & Bemporad Eq. (16): require every agent's coupling multiplier to agree,
+#           REJECTING the combination when they cannot.
 # Full-rank combinations have a unique equilibrium and are identical under both settings.
-USE_HALL_EQ16 = os.environ.get("AMRHG_HALL_EQ16", "1") != "0"
+#
+# Eq. (16) is kept in the tree as a documented alternative but is OFF by default: it fires
+# on only ~15% of steps, and where it does fire it picks a different point of the same
+# manifold than the potential minimiser, measuring 2-4x further from centralized.
+# See [[project_mpgne_option2_deferred]].
+USE_HALL_EQ16 = os.environ.get("AMRHG_HALL_EQ16", "0") != "0"
+
+# Tier-1c 1-hop min-potential refinement breadth (neighbours per agent).  0 disables it
+# entirely, which leaves PURE FACET: point location + self-consistency + neighbour BFS.
+#
+# DEFAULT 0 (off).  Measured 2026-07-21, April week, Gurobi at every one of 480 steps with
+# max_nbr the ONLY variable between the two arms:
+#     worst case   9.052 kW both  (identical — it never improves the headline number)
+#     helps 11/480 steps (2.3%), hurts 0; mean error 0.3230 -> 0.3067 kW
+#     cost 3-4 ms -> 21-51 ms on a normal day (5-16x the median step)
+# The gap to centralized is closed by the VARIATIONAL selection inside _solve_combo_vgne
+# (min-potential point on the rank-deficient manifold), not by this neighbour sweep; an
+# earlier 14 kW -> 9.1 kW improvement was wrongly credited here when both changed at once.
+MAX_NBR = int(os.environ.get("AMRHG_MAX_NBR", "0"))
 
 
 def _assemble_rhg(combo, sols, game):
@@ -366,7 +386,7 @@ def _equilibrium_x(combo, theta, sols, game, tol=STRICT_TOL):
 
 
 def solve_step(theta, sols, game, prev_x, prev_combo, stats=None, max_hops=3, max_rounds=4,
-               max_nbr=2):
+               max_nbr=None):
     """One RTM clearing step, robust near the coupling boundary.
 
     Tier 1 — POINT-LOCATION self-consistency (the reliable primitive): from the warm
@@ -396,6 +416,8 @@ def solve_step(theta, sols, game, prev_x, prev_combo, stats=None, max_hops=3, ma
     # Stacked cost triple for the potential-minimising (variational) selection.
     # Phi is separable across agents (Q block-diagonal) — see _potential_local.
     cost = _stacked_cost(game)
+    if max_nbr is None:
+        max_nbr = MAX_NBR
     N = game.N; nck = 0
     found_x, found_combo = None, None
     # best point-located combo seen (for the bounded-residual last resort)
