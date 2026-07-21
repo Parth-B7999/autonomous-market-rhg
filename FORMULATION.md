@@ -56,10 +56,12 @@ Public union p_gne = [D(6) | λ(4) | p_DA(6) | g_solar(4) | g_wind(4)] = **24** 
 directly; the K^N ≈ 9.7e20 combinations are never enumerated — FACET walks a neighbor graph).
 
 ## 6. Two-settlement closed loop (`rhg_week.py`, DAM in `focapo_1day.py`)
-- **DAM (offline, once/day).** Centralized 24-h social-optimum **LP** (SLSQP, γ=0): linear
-  energy−H₂ objective, hard **daily H₂ floor** `Σ_h η_i p_elec_{i,h} Δt ≥ D_day_i` with
-  `D_day_i = 0.55·P_max_i·η_i·24`, hourly coupling band, renewable balance → hourly anchor
-  `p_DA_{i,h}`. **Not an explicit map, not ADMM.**
+- **DAM (once/day).** **Distributed ADMM** (`dam.solve_dam_admm`, ρ=0.1): each agent solves only its
+  own 24-h QP (linear energy−H₂ objective + tiny γ_DA=1e-4 regulariser) with a hard **daily H₂ floor**
+  `Σ_h η_i p_elec_{i,h} Δt ≥ D_day_i`, `D_day_i = 0.55·P_max_i·η_i·24`, and renewable balance. The
+  **only** exchanged quantity is the per-hour coalition import (already public at the PCC meter); the
+  band is enforced by a closed-form clip in the z-update. Output: hourly anchor `p_DA_{i,h}`.
+  A centralized solve of the *same* regularised problem exists as an offline accuracy oracle only.
 - **RTM (every 15 min, receding).** Paced window demand
   `D_i(t) = clip((D_day_i − h2_inv_i)·H/(steps_left_in_day), 0, D_max_i)` with
   `steps_left_in_day = max(96 − t, H)` (96 fifteen-min steps/day). Assemble nowcast θ_t;
@@ -69,17 +71,21 @@ directly; the K^N ≈ 9.7e20 combinations are never enumerated — FACET walks a
 ```
 per-agent mpQP in private θ_i (PPOPT combinatorial_parallel)   simple_game/rhg_mpqp.py, rhg_offline.py
   → expand to public p_gne slots
-  → online: locate CR per agent at [s, θ] → block-linear equilibrium solve (eliminates s)
-  → 1-hop variational refinement (min-potential feasible = variational GNE = social optimum)
+  → online: locate CR per agent at [s, θ] → block-linear equilibrium solve (eliminates s),
+            selecting the min-potential point on the manifold when M_x is rank-deficient
+            (= variational GNE = social optimum; gne_combiner._solve_equilibrium select="potential")
+  → 1-hop min-potential refinement, ONLY when the coupling binds (interior steps have a unique
+            GNE, so refining there is a provable no-op)
   → FACET neighbor-graph point-location (never enumerates K^N)  src/amrhg/solvers/facet_gne.py
 ```
 Centralized QP (`rhg_online.centralized`, Gurobi) = **offline accuracy oracle only**.
 
 ## 8. Acceptance gate (met)
 `max |p_map − p_centralized| < 1e-3 kW` in the interior, zero lookup misses, single-valued.
-**Validated:** 1–7 Apr and 7–13 Jul 2025 (1344 RTM steps) — interior match ~1e-4 kW, 1 broadcast/step,
-**99.3% iteration-free** (9/1344 warm-started ADMM fallbacks at the degenerate coupling ceiling, where
-the certified GNE is non-variational, bounded to ~2% of the 900 kW band / worst ~19 kW), H₂ 140–141%.
+**Validated 2026-07-21:** 1–7 Apr and 7–13 Jul 2025 (1344 RTM steps) — interior match ~1e-4–1e-6 kW,
+1.12 inter-agent rounds/step, **99.6% iteration-free** (6/1344 warm-started ADMM fallbacks at the
+degenerate coupling ceiling, where the certified GNE can be non-variational, bounded to **9.1 kW**
+worst case ≈1% of the 900 kW band), H₂ 140–141%, median step 4.1 ms.
 
 ## 9. Scope (out)
 No batteries, no H₂ storage tanks, no ramp limits, no `{0}`-branch, no export — kept out to

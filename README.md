@@ -51,28 +51,41 @@ Data: `data/ercot/` (2025 DAM/RTM LMP + solar/wind production CSVs).
 - **Online (per 15-min step):** locate each agent's critical region at `[aggregate, θ_t]` (warm-started
   by the previous step's CR + its facet neighbours — an ~8× speedup over a full scan), solve the
   block-linear equilibrium via the min-potential (variational) selection, and iterate to a
-  self-consistent combination (a certified GNE). The located self-consistent GNE is accepted directly;
-  a neighbour-based refinement was measured to change the dispatch by ≤0.05 kW at ~177 ms/ceiling-step,
-  so it is omitted. **Rare fallback** (0.7% of steps, at the degenerate ceiling): a warm-started
-  distributed ADMM (ρ=0.002, ~27 rounds). Deployed: **1 broadcast + 1 local solve per step**.
+  self-consistent combination (a certified GNE). A 1-hop min-potential refinement then runs **only on
+  steps where the coupling binds** — where `M_x` is rank-deficient the GNE is non-unique and the
+  selection matters; on interior steps it is full rank, the GNE is unique, and the refinement is a
+  provable no-op (so it is skipped). **Rare fallback** (0.4% of steps, at the degenerate ceiling): a
+  warm-started distributed ADMM (ρ=0.002, ~27 rounds). Deployed: **1 broadcast + 1 local solve per step**.
 - **Validation oracle:** centralized Gurobi QP (`rhg_online.centralized`), offline only.
 
-## Results (deployed one-shot; see `report/rhg_detailed_report.pdf`)
+## Results (measured 2026-07-21; see `report/rhg_detailed_report.pdf`)
 Two ERCOT weeks (1–7 Apr, 7–13 Jul 2025), 1344 real-time steps:
-- **99.3% iteration-free** (9/1344 fallbacks); **1 broadcast/step** vs a tuned ADMM's **67 rounds**
-  for the same equilibrium (FACET uses 1.8% of ADMM's total communication).
-- **Median RTM step 3.9 ms** against the 900 s dispatch interval; ~34× faster than ADMM per step.
-- Matches the centralized equilibrium to ~10⁻⁴ kW in the interior; at the non-unique coupling ceiling
-  returns a certified but non-variational GNE, bounded to ~2% of the 900 kW band (worst ~19 kW).
+- **99.6% iteration-free** (6/1344 fallbacks); **1.12 inter-agent rounds/step** vs a tuned ADMM's
+  **67 rounds** for the same equilibrium.
+- **Median RTM step 4.1 ms** against the 900 s dispatch interval (mean 168 ms, p95 200 ms — the tail
+  is the binding-heavy days 04-07 and 07-07, where the refinement runs on most steps).
+- Matches the centralized equilibrium to ~10⁻⁴–10⁻⁶ kW in the interior; at the non-unique coupling
+  ceiling returns a certified GNE bounded to **9.1 kW worst case** (~1% of the 900 kW band).
 - Weekly H₂ target 140–141%; renewable curtailment 5.8–6.8%.
+
+> **Note on the refinement.** It was cut entirely on 2026-07-18 (see
+> `docs/history/STATUS_solver_comparison.md`) after being measured as worth ≤0.05 kW — but that was on
+> the *incomplete* facet-neighbour graph. On the corrected `facet_crossing` graph (~15 neighbours/CR vs
+> ~7) it is worth ~14 kW → 9.1 kW worst case, so it was reinstated, gated on a binding coupling to keep
+> the median at ~4 ms. **The report's tables are not yet reconciled with this** — its Week-1/2 tables
+> predate the cut and its timing table postdates it.
 
 See `bench_solvers.py`/`report_bench.py` for the head-to-head vs ADMM (Douglas–Rachford implemented
 but dropped: it is centralized and violates the privacy model).
 
-## Note
-Earlier design generations (4-agent battery/VRFB framework, H=1 single-step runs, iterative
-version experiments, and their tests/scripts) are in `_archive/` — not part of the current
-pipeline.
+## `_validated_baseline/` — do not delete
+A frozen 2026-07-16 snapshot (code + report + results) of the identical-pair-fleet build. It is the
+only surviving copy of the pre-2026-07-20 online solver and was the reference used to recover the
+variational selection after it was replaced. Keep it until the report is reconciled.
+
+## Session history
+`docs/history/` holds the dated handoff notes (`STATUS_*.md`). They are a record of what was done and
+why, **not** current status — where they disagree with this README or the code, they are stale.
 
 ## License
 MIT © 2026 Parth Brahmbhatt
