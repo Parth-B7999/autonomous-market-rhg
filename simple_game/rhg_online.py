@@ -156,6 +156,20 @@ def solve_online(theta, sols, game, prev_x=None, prev_crs=None, max_nbr=3, tol=1
     return best_x, best_combo
 
 
+# ── Equilibrium-map cache: combo -> (H_x, h_x), or None when unsolvable ──────────────
+# EXACT, not an approximation.  gne_combiner._solve_equilibrium returns the equilibrium
+# as an AFFINE MAP x*(θ) = H_x θ + h_x, and for select="potential" the minimiser over the
+# manifold is itself affine (z*(θ) = A_z θ + b_z).  So (H_x, h_x) depend only on the
+# COMBINATION — never on θ — and can be reused for every step of the run.
+# This is what makes the 1-hop refinement affordable: the 729 candidate combinations
+# recur constantly (the report measures only ~700 distinct combinations over 1344 steps),
+# so after warm-up almost every candidate is a matvec instead of an assemble + SVD.
+_EQ_MISS = object()                 # sentinel: key absent (None means "unsolvable")
+_EQ_CACHE: dict = {}
+_EQ_CACHE_MAX = 30_000              # ~8 kB/entry -> ~240 MB ceiling
+_EQ_STATS = {"hit": 0, "miss": 0}
+
+
 def _solve_combo_vgne(combo, theta, sols, game, cost):
     """Solve the block-linear equilibrium for `combo`, selecting the VARIATIONAL GNE.
 
@@ -172,11 +186,19 @@ def _solve_combo_vgne(combo, theta, sols, game, cost):
     Φ is separable (Q is block-diagonal), so each term uses only that agent's own cost
     data; the stacked `cost` triple is a simulation convenience, not shared information.
     """
-    Mx, Mp, M1 = _assemble_rhg(tuple(combo), sols, game)
+    key = tuple(combo)
+    hit = _EQ_CACHE.get(key, _EQ_MISS)
+    if hit is not _EQ_MISS:
+        _EQ_STATS["hit"] += 1
+        return None if hit is None else hit[0] @ theta + hit[1]
+
+    _EQ_STATS["miss"] += 1
+    Mx, Mp, M1 = _assemble_rhg(key, sols, game)
     eq = _solve_equilibrium(Mx, Mp, M1, select="potential", cost=cost)
-    if not eq.solvable:
-        return None
-    return eq.H_x @ theta + eq.h_x
+    val = (eq.H_x, eq.h_x) if eq.solvable else None
+    if len(_EQ_CACHE) < _EQ_CACHE_MAX:
+        _EQ_CACHE[key] = val
+    return None if val is None else val[0] @ theta + val[1]
 
 
 def _potential_local(x, theta, game):
@@ -458,7 +480,20 @@ def solve_step(theta, sols, game, prev_x, prev_combo, stats=None, max_hops=3, ma
         # shares a cost model and no joint cost matrix is assembled; and no optimizer
         # runs — the candidates already exist, this only ranks them.  Pure local
         # arithmetic on the onboard maps: zero additional communication.
-        if max_nbr > 0:
+        # Gate: the refinement can only change the answer where the equilibrium is
+        # NON-UNIQUE, i.e. where the shared coupling binds for >=2 agents and M_x loses
+        # rank (Hall & Bemporad Def. 2).  On interior steps M_x is full rank, the GNE is
+        # unique, and there is nothing to select — sweeping 3^N combinations there is
+        # provably wasted work.  The report measures the same thing: the refinement costs
+        # "~177 ms on every CEILING-BOUND step".  Detect it physically (cheaper than a
+        # rank test): is the coalition aggregate sitting on L_min or L_max at any step?
+        agg = np.zeros(H)
+        for i in range(N):
+            st = game.x_slice(i).start
+            agg += best_x[st:st + H]
+        binds = bool(np.any(np.abs(agg - R.L_MAX) < 1e-3) or
+                     np.any(np.abs(agg - R.L_MIN) < 1e-3))
+        if max_nbr > 0 and binds:
             bestJ = _potential_local(best_x, theta, game)
             cand = [[found_combo[i]] +
                     [n for n in sols[i].regions[found_combo[i]].facet_neighbors
