@@ -1,0 +1,10 @@
+# Scalability sweep — N agents x H horizon
+
+base_config: configs/base.yaml
+
+sweep:
+  n_agents: [2, 3, 4, 6, 8]
+  rtm_horizon: [3, 6, 12]
+
+# For N > 4: clone VRFB agent template with different seeds for plant params
+clone_template: vrfb

@@ -1,0 +1,16 @@
+import pandas as pd
+WIND_CAPACITY_MW  = 40000   # ERCOT total installed wind (2025)
+SOLAR_CAPACITY_MW = 32000   # ERCOT total installed solar (2025)
+YOUR_SYSTEM_KW    = 500     # your system capacity
+wind  = pd.read_csv("data/ercot/ercot_wind_production_2025.csv")
+solar = pd.read_csv("data/ercot/ercot_solar_production_2025.csv")
+# Capacity factor = actual_gen / total_installed_capacity
+wind['capacity_factor']  = wind['genSystemWide']  / WIND_CAPACITY_MW
+solar['capacity_factor'] = solar['genSystemWide'] / SOLAR_CAPACITY_MW
+# Your 500 kW system estimated generation (kW)
+wind['gen_500kW_kW']  = wind['capacity_factor']  * YOUR_SYSTEM_KW
+solar['gen_500kW_kW'] = solar['capacity_factor'] * YOUR_SYSTEM_KW
+print(f"Wind  avg CF: {wind['capacity_factor'].mean()*100:.1f}%")
+print(f"Solar avg CF: {solar['capacity_factor'].mean()*100:.1f}%")
+print(f"Wind  500kW annual gen: {wind['gen_500kW_kW'].sum()/1000:.0f} MWh")
+print(f"Solar 500kW annual gen: {solar['gen_500kW_kW'].sum()/1000:.0f} MWh")

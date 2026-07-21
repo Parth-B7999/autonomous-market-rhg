@@ -1,0 +1,250 @@
+\documentclass[11pt, letterpaper]{article}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{float}
+\geometry{margin=1in}
+\tcbuselibrary{skins, breakable}
+\newtcolorbox{qbox}[1]{title={#1}, colback=orange!5!white, colframe=orange!70!black,
+  fonttitle=\bfseries, breakable}
+\newtcolorbox{kbox}[1]{title={#1}, colback=blue!4!white, colframe=blue!55!black,
+  fonttitle=\bfseries, breakable}
+\hypersetup{colorlinks=true, linkcolor=blue!50!black}
+
+\title{\textbf{Open Issue for Discussion:\\ Day-Ahead vs.\ Real-Time Coupling Band and\\
+Equilibrium Degeneracy at the Interconnection Ceiling}}
+\author{Parth Brahmbhatt --- University of Wisconsin--Madison}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+In the iteration-free multi-agent receding-horizon market framework, the day-ahead (DAM) and
+real-time (RTM) stages currently use \emph{different} numerical values for the point-of-common-
+coupling (PCC) import band $[L_{\min},L_{\max}]$: the DAM uses $[350,600]$~kW while the RTM uses
+$[100,900]$~kW. Physically these are the \emph{same} interconnection, so unifying them to
+$[100,900]$ seems obviously correct. We tried it. It \textbf{breaks the real-time solver}:
+production collapses and the explicit-map clearing fails on the vast majority of steps. This memo
+documents the experiment, the hard evidence, and the root cause --- \emph{generalized-Nash
+degeneracy when the aggregate import is pinned at the interconnection ceiling} --- and lays out the
+design question we need to decide: whether the day-ahead ceiling should deliberately be a
+\emph{conservative sub-band} of the physical envelope, or whether the real-time equilibrium should
+be reformulated to remain well-posed on the coupling boundary.
+\end{abstract}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Background: the two coupling bands}
+% ─────────────────────────────────────────────────────────────────────────────
+Each 15-minute real-time step, the coalition's grid imports obey a shared per-step band at the PCC,
+\begin{equation}\label{eq:coup}
+  L_{\min}\ \le\ \sum_{i=1}^{N} p_{i,k}\ \le\ L_{\max},\qquad k=0,\dots,H-1,
+\end{equation}
+where $L_{\min}$ is the ISO minimum offer and $L_{\max}=0.75\times1200=900$~kW is the physical
+interconnection limit (75\% of the 1200~kW fleet nameplate). The same band, at hourly resolution,
+constrains the day-ahead schedule that produces the anchor $p^{\mathrm{DA}}_{i,h}$.
+
+\textbf{The inconsistency.} In code, the RTM enforces $[L_{\min},L_{\max}]=[100,900]$
+(\texttt{rhg\_mpqp.py}) but the DAM enforced $[350,600]$ (inherited from an earlier single-step
+demo). Because $L_{\min},L_{\max}$ are physical/market constants, the two stages ``should'' use the
+same numbers. The natural fix is to set the DAM to $[100,900]$ as well. This memo is about what
+happened when we did.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{The experiment: unify the DAM band to $[100,900]$}
+% ─────────────────────────────────────────────────────────────────────────────
+We changed only the DAM band ($350/600\to100/900$); the RTM was already $100/900$. The day-ahead
+distributed ADMM still \emph{converges} and produces a valid schedule --- the DAM itself is fine.
+Table~\ref{tab:dam} shows the resulting day-ahead decision for one representative day.
+
+\begin{table}[H]\centering\small
+\caption{DAM grid-import decision $p^{\mathrm{DA}}_{i,h}$ (kW), ERCOT 2025-04-01, band $[100,900]$.
+Only selected hours shown. The aggregate is \emph{pinned at the 900 ceiling} on 8 of 24 hours, and
+the two grid agents sit at their rated power ($250/200$) most hours.}
+\label{tab:dam}
+\begin{tabular}{r rrrrrr r r}
+\toprule
+hr & PEM\_El & ALK & PEM\_PV & PEM\_PV2 & PEM\_Wd & PEM\_Wd2 & $\sum p$ & $\lambda_{\mathrm{DA}}$\\
+\midrule
+ 1 & 240.9 & 182.1 & 125.0 & 125.0 & 113.5 & 113.5 & \textbf{900} & 2\\
+ 4 & 184.9 & 126.1 & 114.7 & 114.7 & 179.8 & 179.8 & \textbf{900} & $-14$\\
+ 7 & 205.9 & 147.1 & 125.0 & 125.0 & 148.5 & 148.5 & \textbf{900} & 20\\
+10 & 248.5 & 189.7 &  77.4 &  77.4 & 153.4 & 153.4 & \textbf{900} & 24\\
+12 & 202.0 & 143.1 &  89.8 &  89.8 & 187.7 & 187.7 & \textbf{900} & 10\\
+22 & 102.5 &  43.7 &  99.0 &  99.0 &  97.3 &  97.3 & 539 & 50\\
+23 & 219.8 & 161.0 & 119.4 & 119.4 & 140.2 & 140.2 & \textbf{900} & 24\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two features of this schedule matter:
+\begin{enumerate}[nosep]
+\item \textbf{The aggregate hugs the ceiling.} $\sum_i p^{\mathrm{DA}}_{i,h}\in[539,900]$, hitting
+$L_{\max}=900$ on a third of the hours. Under the old $[350,600]$ band the aggregate was
+$[350,600]$ --- \emph{always $\ge300$~kW below the interconnection limit}.
+\item \textbf{Hydrogen is massively over-produced (156--182\% of target).} The daily H$_2$ target is
+a \emph{floor} ($\ge0.55$ capacity factor), not a ceiling. With cheap ERCOT power (often
+$\lambda<\$60$/MWh break-even) and H$_2$ valued at \$3/kg, buying at the full ceiling is
+\emph{profitable}, so the economically-optimal DAM buys as much as the wire allows. The tighter
+$600$ ceiling previously made that physically impossible.
+\end{enumerate}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{What broke: the real-time solver collapses}
+% ─────────────────────────────────────────────────────────────────────────────
+The RTM tracks $p^{\mathrm{DA}}$ (soft $\gamma$-penalty) and re-optimizes on live prices. With the
+ceiling-hugging anchor, \emph{every} RTM step is driven to $\sum_i p_{i,k}\approx900$ --- the
+coupling constraint~\eqref{eq:coup} binds. The consequences (Tables~\ref{tab:before}--\ref{tab:step}):
+
+\begin{table}[H]\centering\small
+\caption{RTM outcome, both validation weeks: DAM band $[350,600]$ (working) vs.\ $[100,900]$.
+A ``miss'' is a step the explicit map cannot resolve.}
+\label{tab:before}
+\begin{tabular}{l cc cc}
+\toprule
+& \multicolumn{2}{c}{DAM $[350,600]$ (interior anchor)} & \multicolumn{2}{c}{DAM $[100,900]$ (ceiling anchor)}\\
+\cmidrule(lr){2-3}\cmidrule(l){4-5}
+Metric & April & July & April & July\\
+\midrule
+Map misses / week (of 672) & \textbf{0} & \textbf{0} & \textbf{322} & up to \textbf{96/day}\\
+Weekly H$_2$ vs target & 125\% & 119\% & \textbf{71\%} & \textbf{0--121\%}\\
+Map $=$ centralized (max) & $\le5.4\!\times\!10^{-4}$ kW & --- & \textbf{91 kW} & \textbf{22 kW}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On several July days \emph{every} step failed (H$_2=0\%$: the coalition produced nothing). To see
+the mechanism we logged each step (Table~\ref{tab:step}): we first try the previous critical-region
+(CR) combination, then walk the FACET neighbour graph out to 3 hops (1st/2nd/3rd neighbour), and
+only if that fails do we fall back to iterative ADMM.
+
+\begin{table}[H]\centering\small
+\caption{Per-step trace, 2025-04-01, DAM band $[100,900]$. The map walk resolves the step at
+$t=0,17$; \emph{every other step} exhausts the 3-hop neighbour walk and falls back to ADMM --- which
+itself runs the full 3000 iterations \emph{without converging} ($\sim$6~s/step). $\sum p$ stays at
+the ceiling throughout.}
+\label{tab:step}
+\begin{tabular}{r l r r}
+\toprule
+step $t$ & resolution & wall time & $\sum_i p_{i,0}$ [kW]\\
+\midrule
+0  & map walk (1 combo checked)          & 0.9 ms   & 872\\
+1  & \textbf{ADMM fallback (3000 iters, not converged)} & 6319 ms  & 868\\
+2  & ADMM fallback (3000 iters)          & 6148 ms  & 871\\
+4  & ADMM fallback (3000 iters)          & 6156 ms  & \textbf{900}\\
+$\vdots$ & $\vdots$ & $\vdots$ & $\vdots$\\
+17 & map walk (1 combo checked)          & 2.4 ms   & 894\\
+18 & ADMM fallback (2982 iters)          & 5942 ms  & 880\\
+$\vdots$ & (94 of 96 steps fall back)    & $\sim$6 s each & $\approx$855--900\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+So \textbf{neither} solver works at the ceiling: the explicit map finds no self-consistent CR
+combination within 3 hops, \emph{and} the ADMM fallback fails to converge in 3000 iterations. This is
+not an implementation slip in the neighbour walk --- the walk correctly reports ``no valid combo''
+and escalates. The equilibrium itself is the problem.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Root cause: GNE degeneracy on the coupling boundary}
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{kbox}{Why the equilibrium is ill-posed when $\sum_i p_{i,k}=L_{\max}$}
+Interior to the band, the shared constraint~\eqref{eq:coup} is \emph{inactive}: each agent's best
+response depends on the others only through the aggregate it sees, the game is an exact potential
+game, and its \emph{variational} GNE is a single-valued, piecewise-affine map of the parameters ---
+exactly what the explicit multiparametric map represents, and why it matched the centralized optimum
+to $\le\!10^{-4}$~kW under the old band.
+
+When the aggregate is pinned at $L_{\max}$, the coupling \emph{binds}. At a binding shared
+constraint the variational GNE requires a \emph{common} Lagrange multiplier enforced across all $N$
+agents simultaneously (the coupled KKT stationarity). The per-agent explicit maps each carry their
+\emph{own} view of the coupling, so their fixed point on the boundary is a \emph{degenerate vertex}
+where (i) the block-linear equilibrium system can become singular / rank-deficient, and (ii) multiple
+non-variational ``corner'' equilibria coexist with the variational one. The 1-hop min-potential
+refinement that normally selects the variational branch has no self-consistent combo to refine, so
+the walk returns nothing. Independently, ADMM's convergence rate collapses at the degenerate active
+set (consistent with the pre-existing note that ADMM was ``unreliable/unconverged at these
+settings''), so it too fails.
+\end{kbox}
+
+This is a \emph{known} limitation, already recorded in the detailed report:
+\begin{quote}\itshape
+``Degenerate vertices. Where a capacity box and the coupling activate together, the 1-hop
+variational refinement can leave a bounded residual; $L_{\min}=100$ keeps most operation interior,
+so it is small, and there were zero misses.''
+\end{quote}
+The phrase ``keeps most operation interior'' is the whole point. The tighter $600$ DAM ceiling was
+\textbf{keeping real-time dispatch in the interior}, away from the boundary where the method
+degenerates. Under the $900$ DAM ceiling, ``most operation'' is no longer interior --- it is
+\emph{on} the boundary, every step --- and the method has nothing to fall back on.
+
+\begin{kbox}{The one-line finding}
+The DAM ceiling being lower than the physical interconnection limit is \textbf{not a leftover bug}.
+It is load-bearing: it holds the real-time equilibrium in the well-posed interior. Unifying the DAM
+ceiling to the full $900$~kW is \emph{incompatible} with the current explicit-map GNE method.
+\end{kbox}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{The question for discussion}
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{qbox}{What we need to decide}
+Is it acceptable (and defensible in the paper) to let the \emph{day-ahead commitment} use a
+conservative import ceiling $L_{\max}^{\mathrm{DA}}<L_{\max}^{\mathrm{RT}}=900$, so that real-time
+dispatch stays interior and the iteration-free equilibrium remains well-posed? Or must the real-time
+equilibrium be reformulated to remain single-valued \emph{on} the coupling boundary?
+\end{qbox}
+
+\noindent The options, with trade-offs:
+
+\begin{description}[leftmargin=1.4em]
+\item[\textbf{Option A --- conservative day-ahead ceiling (recommended).}]
+Keep $L_{\min}=100$ shared by both stages, but set the DAM ceiling to a conservative
+$L_{\max}^{\mathrm{DA}}\approx600$~kW, documented as an intentional design choice: \emph{the
+coalition commits day-ahead to a conservative import ceiling and reserves the real-time headroom up
+to the full $900$~kW interconnection.} This is a legitimate, common two-settlement posture
+(day-ahead positions are routinely conservative relative to physical limits) and it \emph{also}
+keeps the equilibrium interior and unique. Restores the validated results (0 misses, 119--125\%
+H$_2$, $\le5.4\!\times\!10^{-4}$~kW). \emph{Cost:} the paper must state and justify the two
+ceilings rather than claim a single physical band; the coalition forgoes some cheap-power arbitrage
+in the top $300$~kW of the wire.
+
+\item[\textbf{Option B --- make the RT equilibrium well-posed on the boundary.}]
+Regularize the coupling (e.g.\ a small quadratic penalty / soft constraint, or an explicit
+common-multiplier formulation) so the variational GNE stays single-valued when $\sum p=L_{\max}$.
+This lets the DAM legitimately use the full $900$ ceiling. \emph{Cost:} it changes the RTM
+optimization model, requires re-deriving and re-solving the per-agent multiparametric maps offline,
+and re-validating accuracy; it may also enlarge the critical-region count.
+
+\item[\textbf{Option C --- cap day-ahead over-production.}]
+Add a day-ahead H$_2$ \emph{ceiling} (or an import cap below $900$) so the DAM stops buying at the
+interconnection limit. \emph{Cost:} this is economically equivalent to Option A (it is just another
+way of keeping the anchor off the ceiling) but is harder to justify --- it forbids profitable
+production rather than making a conservative commitment.
+
+\item[\textbf{Option D --- accept ADMM at binding-coupling steps.}]
+Not viable as-is: the evidence shows ADMM \emph{does not converge} at these degenerate steps (3000
+iterations, non-converged), and it would forfeit the ``iteration-free, one broadcast per step''
+contribution that is the paper's core claim.
+\end{description}
+
+\paragraph{Recommendation.} Option~A: keep the conservative day-ahead ceiling, share $L_{\min}=100$,
+and document the two ceilings as a deliberate conservative-commitment design. It is the only option
+that preserves the validated iteration-free results without a modeling overhaul, and it is honest
+about \emph{why} the day-ahead position is conservative. Option~B is the ``right'' long-term fix if a
+reviewer insists the day-ahead stage must be allowed to the full physical limit, but it is a research
+task (re-derive + re-validate the maps), not a constant change.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section*{Appendix: reproduction}
+% ─────────────────────────────────────────────────────────────────────────────
+\small
+DAM decision table: \texttt{dam.solve\_dam\_admm} on 2025-04-01 forecast (band set in
+\texttt{rhg\_mpqp.L\_MIN/L\_MAX}). Weekly RTM: \texttt{simple\_game/rhg\_week.py}. Per-step trace:
+\texttt{rhg\_online.solve\_step} with per-step data-transfer logging (map-walk step $=1$ broadcast;
+fallback step $=$ ADMM iteration count). All ERCOT 2025 data in \texttt{data/ercot/}.
+
+\end{document}

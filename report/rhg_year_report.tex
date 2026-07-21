@@ -1,0 +1,115 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{amsmath,amssymb}
+\usepackage{siunitx}
+\usepackage[table]{xcolor}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\usepackage[colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black]{hyperref}
+
+\graphicspath{{../results/figures/}}
+\newcommand{\figdir}[1]{../results/figures/#1}
+
+\title{\textbf{FACET-RHG at Full-Year Scale}\\[2pt]
+\large Iteration-Free Multi-Agent RTM Clearing over ERCOT 2025 (362 days)}
+\author{Parth Brahmbhatt \quad\textbullet\quad UW--Madison}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+The two 7-day runs in the main report are extended to the \textbf{whole of 2025}: the 6-agent
+green-hydrogen real-time market is cleared by online FACET on \textbf{362 days} ($3$ DST/data-gap days
+excluded), \textbf{$34{,}752$ dispatch steps}, and benchmarked step-for-step against a tuned ADMM
+($\rho=0.01$) on the \emph{identical} parameter sequence, warm-start block. Two conclusions. First, the
+\emph{communication} claim is robust across every month: FACET clears a step in a \textbf{median of one}
+inter-agent round versus ADMM's \textbf{$\sim$67}, winter to summer, spending $1.5\%$ of ADMM's total
+traffic. Second, FACET's accuracy is seasonally modulated and the mechanism is physical: the share of
+steps reaching the oracle's $10^{-4}$~kW bar tracks the ceiling-binding fraction ($r=-0.87$), which is
+itself driven by renewable scarcity ($r=-0.74$). September --- ERCOT's renewable-low month --- is the
+annual worst case. The year revises two headline numbers honestly: iteration-free rate
+$99.3\%\!\to\!98.9\%$ and FACET reach $80\%\!\to\!76\%$; the two chosen weeks sat on the optimistic side.
+\end{abstract}
+
+\section{Setup}
+Every 2025 calendar day is run except \texttt{2025-03-09}, \texttt{2025-11-02}, and \texttt{2025-12-04}
+(spring-forward $92$-interval, fall-back $100$-interval, and a $95$-interval data gap --- the RTM feed is
+not $96$ steps on these). Each day uses a deterministic per-day seed, the full receding-horizon DAM$\to$RTM
+closed loop, and the warm-start benchmark block (all methods initialised from the previous step, the
+deployment-realistic regime; the cold-start block remains on the two-week sample). The shared stopping
+metric is $\lVert x-x_{\mathrm{ref}}\rVert_\infty<10^{-4}$~kW against a Gurobi oracle. The full
+FACET-vs-ADMM table over the year is Table~\ref{tab:bench-warm}.
+
+\input{../results/bench_warm_year_table}
+
+\section{Communication is robust across the year}
+The implementation-independent claim is communication. Over $34{,}752$ steps it does not drift: the median
+inter-agent round count is $1$ for FACET and $66$--$68$ for ADMM in every season
+(Fig.~\ref{fig:rounds}), and median wall time holds at $\sim\!4$~ms vs $\sim\!135$~ms. This is the number
+that survives hardware, language, and network assumptions --- it is now backed by $26\times$ the original
+sample.
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.72\linewidth]{year_rounds.pdf}
+\caption{Median inter-agent rounds per step by meteorological season. FACET is $\approx1$ in every group;
+ADMM sits at $66$--$68$. The $1$-vs-$67$ separation is flat year-round.}
+\label{fig:rounds}
+\end{figure}
+
+\section{Accuracy tracks the binding fraction}
+FACET returns a \emph{certified} equilibrium on every step, but only reaches the oracle bar when the shared
+PCC ceiling is slack; when the coalition pins the ceiling it returns a certified but \emph{non-variational}
+GNE, off the social optimum by a bounded margin. Across the year the daily relationship is nearly linear
+(Fig.~\ref{fig:scatter}): $r=-0.87$ between binding fraction and reach. September clusters in the hard
+bottom-right.
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.66\linewidth]{year_scatter.pdf}
+\caption{Daily FACET reach vs.\ ceiling-binding steps per day (one dot per day, $n=362$). As binding rises,
+the share of steps resolved to tolerance falls; September highlighted.}
+\label{fig:scatter}
+\end{figure}
+
+\section{Seasonal shape and its driver}
+Binding is not price-driven --- its dominant correlate is renewable availability ($r=-0.74$): when the wind
+and solar farms produce less, the electrolyzers lean on grid import to meet their cumulative-H$_2$ floor and
+the fleet pushes into the shared ceiling. The monthly shape (Fig.~\ref{fig:binding}) runs from a spring
+trough ($\sim\!15$ binding steps/day in Mar/Apr) to a late-summer/fall ridge ($27$--$32$ in Aug/Sep).
+September binds most and is hardest for FACET \emph{even though} its mean real-time price (\$31.3) is
+identical to April's (\$31.1). Table~\ref{tab:year-seasonal} summarises.
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.72\linewidth]{year_binding.pdf}
+\caption{Mean ceiling-binding steps per day by month; dotted line is the annual mean ($21$). The report's
+original Apr$+$Jul sample sat near this mean and missed the September peak.}
+\label{fig:binding}
+\end{figure}
+
+\input{../results/year_seasonal_table}
+
+\section{What the year revises --- honestly}
+Two numbers move against the two-week sample. The \textbf{iteration-free rate is $98.9\%$} year-round
+($397$ ADMM fallbacks / $34{,}752$ steps) versus $99.3\%$ on Apr$+$Jul, with fallbacks concentrated in
+fall (SON $169$ of $397$). \textbf{FACET reach is $76.3\%$} full-year versus $80\%$ in the sample. Neither
+weakens the contribution: the claim that matters (communication, $1$ vs $67$; speed, $\sim\!33\times$;
+$1.5\%$ traffic share) is fully robust, and the accuracy cost is now \emph{characterised} --- ``worst at
+the fall renewable-scarcity peak, bounded at all times'' --- rather than represented by a single favourable
+window. The complete per-month ledger is Table~\ref{tab:year-monthly}.
+
+\input{../results/year_monthly_table}
+
+\vspace{1em}
+\noindent\rule{\linewidth}{0.4pt}\\[2pt]
+{\footnotesize\sloppy Generated from \texttt{results/year2025/} (362 per-day files) and
+\texttt{results/\allowbreak solver\_bench\_\allowbreak year.pkl}.\\
+Figures and tables: \texttt{simple\_game/year\_report.py}.\\
+FACET-vs-ADMM table: \texttt{report\_bench.py} with \texttt{-{}-bench
+results/\allowbreak solver\_bench\_\allowbreak year.pkl -{}-suffix \_year}.}
+
+\end{document}

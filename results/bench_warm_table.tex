@@ -1,0 +1,19 @@
+\begin{table}[H]\centering\small
+\begin{tabular}{llcccccc}
+\toprule
+regime & method & reached $10^{-4}$~kW & mean [ms] & median [ms] & p95 [ms] & max [ms] & median rounds\\
+\midrule
+\multirow{2}{*}{all steps ($n{=}1344$)} & FACET-RHG & 1078/1344 & 43.9 & 3.7 & 13.4 & 6030.5 & 1\\
+ & ADMM & 1277/1344 & 143.8 & 130.7 & 244.2 & 343.9 & 67\\
+\midrule
+\multirow{2}{*}{binding ($n{=}273$)} & FACET-RHG & 117/273 & 99.5 & 7.6 & 18.9 & 5715.7 & 1\\
+ & ADMM & 229/273 & 154.6 & 133.1 & 273.6 & 299.0 & 69\\
+\midrule
+\multirow{2}{*}{slack ($n{=}1071$)} & FACET-RHG & 961/1071 & 29.7 & 3.6 & 11.5 & 6030.5 & 1\\
+ & ADMM & 1048/1071 & 141.1 & 129.9 & 225.3 & 343.9 & 67\\
+\midrule
+\bottomrule
+\end{tabular}
+\caption{Warm-start block: FACET-RHG vs.\ ADMM, every method initialised identically. \textbf{Timing is the full per-step wall clock over all steps --- FACET's figure INCLUDES its ADMM fallback on the steps that fall back.} ``Reached $10^{-4}$~kW'' is accuracy vs.\ the oracle. ADMM tuned at $\rho=0.01$ (swept on binding steps); its stop is oracle-assisted (favouring ADMM). Communication (median rounds) is the implementation-independent claim.}
+\label{tab:bench-warm}
+\end{table}

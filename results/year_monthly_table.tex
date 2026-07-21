@@ -1,0 +1,25 @@
+\begin{table}[H]\centering\small
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Month & Days & bind/96 & H$_2$\% & FACET & ADMM & FACET & ADMM & ADMM\\
+ & & & & reach & reach & [ms] & [ms] & fb\\
+\midrule
+Jan & 31 & 24.8 & 143 & 73\% & 89\% & 4.3 & 137 & 11\\
+Feb & 28 & 24.0 & 147 & 72\% & 90\% & 4.3 & 137 & 13\\
+Mar & 30 & 14.7 & 147 & 81\% & 94\% & 4.1 & 136 & 16\\
+Apr & 30 & 14.5 & 147 & 83\% & 94\% & 4.1 & 134 & 25\\
+May & 31 & 23.3 & 138 & 77\% & 94\% & 4.1 & 135 & 36\\
+Jun & 30 & 16.7 & 144 & 80\% & 93\% & 4.2 & 134 & 29\\
+Jul & 31 & 23.8 & 139 & 75\% & 91\% & 4.1 & 135 & 32\\
+Aug & 31 & 27.3 & 132 & 72\% & 90\% & 4.2 & 134 & 50\\
+Sep & 30 & 31.6 & 138 & 65\% & 89\% & 4.5 & 138 & 74\\
+Oct & 31 & 22.1 & 140 & 74\% & 92\% & 4.2 & 138 & 64\\
+Nov & 29 & 14.9 & 137 & 81\% & 94\% & 4.1 & 134 & 31\\
+Dec & 30 & 15.1 & 142 & 83\% & 96\% & 4.1 & 133 & 16\\
+\midrule
+\textbf{Year} & 362 & 21.1 & 141 & 76\% & 92\% & 4.1 & 135 & 397\\
+\bottomrule
+\end{tabular}
+\caption{Full-year monthly ledger (ERCOT 2025, warm block). ``bind/96'' is mean ceiling-binding steps per day; ``reach'' is the share of steps meeting the $10^{-4}$~kW oracle bar; median comms rounds are 1 (FACET) / 66--68 (ADMM) in every month. Iteration-free rate 98.9\% (34355/34752).}
+\label{tab:year-monthly}
+\end{table}

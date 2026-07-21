@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Data and results (large files — share via external storage)
+data/raw/
+data/processed/
+results/figures/
+results/tables/
+*.pkl
+*.npz
+*.csv
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Gurobi
+gurobi.log
+
+# Added 2026-07-21
+data/*.zip
+.pytest_cache/
+# LaTeX build products (keep .tex / .pdf)
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz

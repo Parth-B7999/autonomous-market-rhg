@@ -1,0 +1,1527 @@
+\documentclass[11pt, letterpaper]{article}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\geometry{margin=1in}
+\tcbuselibrary{skins, breakable}
+\newtcolorbox{agentbox}[1]{title={#1}, colback=blue!3!white, colframe=blue!55!black,
+  fonttitle=\bfseries, breakable}
+\newtcolorbox{keybox}[1]{title={#1}, colback=green!3!white, colframe=green!45!black,
+  fonttitle=\bfseries, breakable}
+\newtcolorbox{warnbox}[1]{title={#1}, colback=orange!5!white, colframe=orange!70!black,
+  fonttitle=\bfseries, breakable}
+\hypersetup{colorlinks=true, linkcolor=blue!50!black}
+
+\title{\textbf{Multi-Agent Receding-Horizon Games for Autonomous Market Participation}\\[4pt]
+\large Detailed Case-Study Report --- Distributed Day-Ahead ADMM \& Explicit\\
+Real-Time FACET Generalized Nash Equilibrium\\
+\normalsize Green-H$_2$ coalition, ERCOT 2025, $H=4$ (1-hour) receding horizon, PCC band $[100,900]$ kW}
+\author{Parth Brahmbhatt --- University of Wisconsin--Madison}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\bigskip\hrule\bigskip
+
+\begin{abstract}
+Six independently-owned green-hydrogen electrolyzers behind one point-of-common-coupling (PCC) bid
+collectively into the ERCOT two-settlement market. \textbf{Both} market stages are solved fully
+distributed, over the \emph{same} physical PCC import band $[L_{\min},L_{\max}]=[100,900]$~kW, and
+\emph{no agent ever shares its cost model}. The day-ahead (DAM) anchor is set by a distributed
+\textbf{ADMM} in which each agent solves only its own 24-hour QP and the sole shared quantity is
+the per-hour coalition import. Real-time dispatch (RTM, 15-min) is a \textbf{receding-horizon}
+($H=4$) parametric generalized Nash equilibrium (GNE) solved online by \textbf{FACET}: each agent
+locates its own precomputed critical region by warm-started point-location over its facet-neighbour
+graph (never enumerating the $K^N\!\approx\!1.1\times10^{21}$ combinations), the coalition combination
+is made self-consistent, and the \emph{variational} GNE (= social optimum) is recovered by a
+potential-minimizing solve that remains valid when the coupling binds. All six agents are distinct
+in converter rating and efficiency, so each carries its own offline map. Over two independent ERCOT
+weeks (1--7 April, 7--13 July 2025; $-\$1$ to $\$3553$/MWh) FACET clears \textbf{99.3\%} of steps
+\emph{iteration-free} --- a \textbf{median of one inter-agent round per step} against the $67$ a
+tuned distributed ADMM needs for the same equilibrium ($1.8\%$ of its communication over the two
+weeks), at a median \textbf{3.9~ms} against a $900$~s dispatch interval --- meeting the weekly
+H$_2$ target at \textbf{140--141\%}, holding renewable curtailment to \textbf{5.8--6.8\%} of
+available generation, and matching the centralized equilibrium to $\sim\!10^{-4}$~kW in the
+interior. Against ADMM head-to-head, identically initialised and judged by the same metric, FACET
+is $\sim\!34\times$ faster at the median step; the robust, implementation-independent claim, though,
+is the communication ($1$ vs $67$ rounds). On the $0.7\%$ of steps at the degenerate coupling
+ceiling FACET returns a certified but not-necessarily-\emph{variational} GNE (bounded to
+$\sim\!2\%$ of the PCC band), and a warm-started distributed ADMM fallback ($\sim\!27$ rounds) is
+the only iteration. This report documents each agent's optimization problem, the distributed DAM
+and the online FACET clearing step by step, and all measured results including the solver
+comparison, solve times and curtailment. \S\ref{sec:limit} reports honestly that the residual
+degeneracy --- not the fleet composition --- is what bounds the iteration-free rate.
+\end{abstract}
+
+\section{Nomenclature}\label{sec:nomen}
+% ─────────────────────────────────────────────────────────────────────────────
+Every symbol and every term of art used in this report is defined here, and used nowhere in a looser
+sense.
+
+\begin{keybox}{Terms of art}
+\begin{description}[leftmargin=0pt,labelindent=0pt,style=nextline,nosep,itemsep=2pt]
+\item[Generalized Nash equilibrium (GNE)] A collective decision at which no agent can lower its own
+cost by unilaterally changing its own decision. ``Generalized'' means the agents' \emph{feasible sets}
+are coupled --- here by the PCC band --- not merely their costs.
+\item[Variational GNE (v-GNE)] The particular GNE at which the Lagrange multipliers of the coupling
+constraint are equal across agents. For a potential game it coincides with the minimizer of the
+potential, i.e.\ the \emph{social optimum}. When several GNE exist, this is the one we select.
+\item[Potential game] A game admitting a single function $\Phi$ (the \emph{potential}) whose gradient
+reproduces every agent's cost gradient. Consequence used throughout: the v-GNE is
+$\arg\min\Phi$ over the joint feasible set.
+\item[Multiparametric QP (mpQP)] A quadratic program solved \emph{once, offline}, symbolically in its
+parameters, yielding the optimizer as an explicit piecewise-affine function of those parameters.
+\item[Critical region (CR)] One piece of that piecewise-affine function: a polytope in parameter space
+inside which the optimizer is a single affine function of the parameters. Written $E_it_i\le f_i$
+with law $x_i=G_it_i+g_i$.
+\item[Combination] A choice of one CR per agent, $\mathcal C=(r_0,\dots,r_5)$. There are
+$K^N\approx1.1\times10^{21}$ of them; we never enumerate them.
+\item[Point location] Determining which CR contains a given parameter point, by the containment test
+$E_it_i\le f_i$. Pure arithmetic: no optimization, no randomness, no tolerance beyond $\varepsilon$.
+\item[Warm start] The initial iterate $x^{(0)}$ of a step, taken to be the \emph{previous} 15-minute
+step's certified solution. Not an approximation of the answer --- only a starting point whose
+correctness is tested (see \emph{self-consistency}).
+\item[Iterate] The value $x^{(r)}$ carried at round $r$ of the fixed-point loop. Each round produces
+the next iterate by an exact solve; iterates are never averaged, relaxed, or damped.
+\item[Self-consistency] The acceptance test: recomputing every agent's parameter point from the
+\emph{solved} decision returns the same CRs that were assumed in order to compute it. Passing this
+test certifies a GNE (\S\ref{sec:walkthrough}.6); nothing is accepted without it.
+\item[Facet neighbour] A CR sharing a facet (a full-dimensional face) with a given CR.
+\item[Iteration-free step] A step cleared with \textbf{exactly one decision broadcast per agent}. All
+location, solving and refinement is local computation on the onboard maps and costs no communication,
+however many rounds it takes.
+\item[Fallback step] A step where the loop fails to certify and a warm-started distributed ADMM is run
+instead --- the only part of the method in which agents exchange messages iteratively.
+\end{description}
+\end{keybox}
+
+\begin{table}[H]\centering\small
+\begin{tabular}{lll}
+\toprule
+Symbol & Meaning & Size / value\\
+\midrule
+\multicolumn{3}{l}{\emph{Indices and dimensions}}\\
+$i,j$        & agent indices & $0,\dots,5$\\
+$N$          & number of agents & $6$\\
+$k$          & step index within the horizon & $0,\dots,H{-}1$\\
+$H$          & receding horizon length & $4$ steps ($1$ hour)\\
+$\Delta t$   & step duration & $0.25$ h\\
+$t$          & real-time (RTM) step index within a day & $0,\dots,95$\\
+$r$          & round index of the fixed-point loop & $1,\dots,4$\\
+\midrule
+\multicolumn{3}{l}{\emph{Decisions}}\\
+$p_i$        & agent $i$'s grid import over the horizon & $\mathbb R^{4}$ (kW)\\
+$cv_i$       & agent $i$'s renewable curtailment (renewable agents only) & $\mathbb R^{4}$ (kW)\\
+$x_i$        & agent $i$'s decision block: $p_i$ (grid) or $[p_i;cv_i]$ (renewable) & $\mathbb R^{4}$ or $\mathbb R^{8}$\\
+$x$          & stacked decision vector of all agents & $\mathbb R^{40}$\\
+$x^\star$    & the certified equilibrium of a step & $\mathbb R^{40}$\\
+\midrule
+\multicolumn{3}{l}{\emph{Parameters}}\\
+$\theta$     & \textbf{public} market data of the current step & $\mathbb R^{24}$\\
+$D_i$        & H$_2$ still owed by agent $i$ over the horizon & kg\\
+$\lambda_{\mathrm{RT}}$ & real-time price over the horizon & \$/MWh\\
+$p_{\mathrm{DA},i}$ & agent $i$'s day-ahead award for the current hour & kW\\
+$g_s,g_w$    & solar / wind availability at the shared farms & kW\\
+$s_i$        & coalition aggregate excluding $i$: $\sum_{j\ne i}p_j$ & $\mathbb R^{4}$ (kW)\\
+$t_i$        & agent $i$'s \textbf{private} parameter point $[\,s_i\,;\,\theta\,]$ & $\mathbb R^{28}$\\
+$S$          & selector: extracts the first $H$ entries (the $p$-part) of $x_j$ & $\mathbb R^{4\times n_{x_j}}$\\
+\midrule
+\multicolumn{3}{l}{\emph{Physical and economic constants}}\\
+$L_{\min},L_{\max}$ & PCC import band, binding on $\sum_ip_i$ at every step & $100,\ 900$ kW\\
+$P_{\max,i}$ & agent $i$'s electrolyzer (converter) rating & kW\\
+$\eta_i$     & agent $i$'s electrolyzer efficiency & kg/kWh\\
+\midrule
+\multicolumn{3}{l}{\emph{Maps and equilibrium system}}\\
+$E_i,f_i$    & the polytope of one CR of agent $i$ & $E_it_i\le f_i$\\
+$G_i,g_i$    & the affine law carried by that CR & $x_i=G_it_i+g_i$\\
+$G_i^{s},G_i^{\theta}$ & $G_i$ split at column $H$, matching $t_i=[s_i;\theta]$ & --- \\
+$r_i$        & index of the CR located for agent $i$ & --- \\
+$\mathcal C$ & combination: one CR per agent, $(r_0,\dots,r_5)$ & --- \\
+$M_x,M_p,M_1$& the equilibrium system $M_xx=M_p\theta+M_1$ & $40{\times}40$, $40{\times}24$, $\mathbb R^{40}$\\
+$V_2$        & basis of $\ker M_x$ when $M_x$ is rank-deficient & --- \\
+$y_2$        & coordinate on the GNE manifold, $x=x_p+V_2y_2$ & $\mathbb R^{40-\mathrm{rank}M_x}$\\
+\midrule
+\multicolumn{3}{l}{\emph{Cost}}\\
+$Q,c,F$      & stacked cost: $\Phi(x)=\tfrac12x^\top Qx+(c+F\theta)^\top x$ & $Q\succ0$, $\lambda_{\min}=10^{-3}$\\
+$\Phi$       & coalition potential; its minimizer over the feasible set is the v-GNE & --- \\
+$G,w_0,W$    & joint feasible set of the coalition, $Gx\le w_0+W\theta$ & $142\times40$\\
+\bottomrule
+\end{tabular}
+\caption{Nomenclature. Sizes are those of the case study of this report ($N{=}6$, $H{=}4$).}
+\label{tab:nomen}
+\end{table}
+
+\section{Method overview and contributions}\label{sec:overview}
+% ─────────────────────────────────────────────────────────────────────────────
+This section states the problem, the method, and what is new, in full but without detail. The complete
+derivation, line-by-line algorithm and two traced numerical examples are in
+\S\ref{sec:walkthrough}; readers who want the mechanism should go there.
+
+\subsection{The problem}
+Six independently-owned green-hydrogen electrolyzers sit behind one point of common coupling (PCC) and
+bid as a coalition into ERCOT. Every $15$ minutes the market publishes $\theta$ --- prices, renewable
+availability, each agent's remaining H$_2$ obligation, the day-ahead awards --- and the coalition must
+produce a dispatch $x^\star$ that is a \textbf{generalized Nash equilibrium}: no agent can lower its
+own cost by deviating, and the coalition's total import obeys the physical band
+$L_{\min}\le\sum_ip_i\le L_{\max}$ at every step.
+
+The binding difficulty is not the equilibrium itself but the ownership model. \textbf{No agent
+discloses its cost model}, so no party --- not even a hypothetical coordinator --- can assemble the
+joint problem at runtime. Any admissible method must be built from quantities each agent can compute
+alone, plus data that is already public. The only such coupling quantity is the coalition's total
+import, which is already measured at the PCC meter.
+
+\subsection{What FACET-RHG does}
+Offline and once, each agent solves \emph{its own} mpQP and stores the result as a lookup table of
+critical regions. Online, at each step, the coalition runs a \textbf{fixed-point iteration on the
+combination}, summarized in Figure~\ref{fig:loop}.
+
+\begin{figure}[H]\centering
+\begin{tcolorbox}[colback=blue!2!white,colframe=blue!50!black,width=0.94\textwidth,
+                  title={\bfseries One 15-minute step: warm start $\to$ locate $\to$ solve $\to$ certify}]
+\small
+\begin{enumerate}[leftmargin=1.9em,nosep,itemsep=3pt]
+\item[\textbf{0.}] \textbf{Warm start.} Take $x^{(0)}$ to be the previous step's \emph{certified}
+solution. Steps are $15$ minutes apart, so $\theta$ has moved little.
+\item[\textbf{1.}] \textbf{Locate} (each agent, locally, in parallel). Agent $i$ forms its private
+parameter point $t_i=[\,s_i\,;\,\theta\,]$, where $s_i=\sum_{j\ne i}p_j$ is read off the current
+iterate, and finds the CR containing it by the containment test $E_it_i\le f_i$. Deterministic
+arithmetic --- no optimization, no randomness. Six lookups give a combination $\mathcal C$.
+\item[\textbf{2.}] \textbf{Solve exactly.} \emph{Given} $\mathcal C$, every agent's law is affine, so
+the six coupled best responses collapse into one linear system $M_xx=M_p\theta+M_1$ whose exact
+solution returns \emph{all six} agents' decisions at once. Where $M_x$ is rank-deficient --- the
+coupling ceiling --- the GNE form a manifold and we select the \emph{variational} one by minimizing
+the potential $\Phi$ over it.
+\item[\textbf{3.}] \textbf{Certify.} Recompute each $t_i$ from the \emph{solved} $x$ and locate again.
+If every agent returns the CR it was assumed to be in, the combination has reproduced itself: each
+agent is provably best-responding to the aggregate that actually materializes, which \emph{is} the
+definition of a GNE. Accept and stop. Otherwise adopt $x$ as the next iterate and return to 1.
+\end{enumerate}
+\tcblower
+\small Steps 1--3 are \textbf{local computation on the onboard maps}. The inter-agent exchange is
+\textbf{exactly one decision broadcast per agent per step}, regardless of how many rounds run.
+\end{tcolorbox}
+\caption{The online method. Nothing is accepted that has not passed step 3.}
+\label{fig:loop}
+\end{figure}
+
+Two properties are worth stating plainly, because both are easy to mis-read:
+\begin{itemize}[leftmargin=1.4em,nosep]
+\item \textbf{The warm start is not an approximation of the answer.} It is only a starting point, and
+its correctness is \emph{tested} in step 3. A poor warm start costs extra rounds of local arithmetic,
+never a wrong dispatch. On 6~April, $82$ of $96$ steps certified on the first round.
+\item \textbf{The method is sound, not complete.} Step 3 never accepts a wrong answer, but the loop is
+not guaranteed to reach a fixed point. When it does not, the step falls back (\S\ref{sec:facet}); the
+cost is a slower step, never a silently incorrect one.
+\end{itemize}
+
+\subsection{What is new here}
+The architecture --- per-agent offline maps, a block linear system of affine best responses, membership
+validation, one exchange per step --- is inherited from our IF-mpDiMPC work (Saini \emph{et al.},
+\emph{Comput.\ Chem.\ Eng.}\ 200, 2025) and its ACC-2026 successor. \textbf{Point location is not new:
+IF-mpDiMPC-V2 already performs it.} What is new is what the \emph{game} forces, none of which arises in
+cooperative distributed MPC, where all controllers share one objective and the solution is unique:
+
+\begin{enumerate}[leftmargin=1.7em,nosep,itemsep=3pt]
+\item \textbf{Rank-deficient systems carry the answer instead of signalling an error.} IF-mpDiMPC
+discards singular systems (\texttt{if abs(det(L)) < 1e-10: return None}) --- correct there, because a
+unique solution means singularity implies a wrong combination. Here $M_x$ is genuinely rank-deficient
+whenever the PCC band binds for several agents at once (rank $36$ of $40$ in the traced example of
+\S\ref{sec:walkthrough}.8), the equilibria form a manifold, and the answer lies on it. We select the
+variational GNE from that manifold, and re-impose feasibility on the selection when required
+(Tier~1c).
+\item \textbf{The iterate is refined rather than enumerated around.} IF-mpDiMPC-V2 and FACET-DiMPC
+point-locate once and compensate by enumerating the product $\prod_i(1+|\mathcal N_i|)$ over each
+agent's facet neighbours --- $985{,}608$ combinations at $t{=}0$ for this fleet. We instead re-locate
+and iterate, solving a mean of $\mathbf{1.2}$ combinations per step. This matters because the locality
+assumption underpinning the neighbour product fails in this game: when the combination changes,
+$93.1\%$ (April) / $92.1\%$ (July) of the changes are more than three facet-hops away
+(\S\ref{sec:walkthrough}.10).
+\item \textbf{The coupling is sum-compressed.} IF-mpDiMPC's parameter vector carries every other
+controller's full input trajectory, growing as $M\!\cdot\!N_p\!\cdot\!n_u$; ours carries four numbers,
+because the PCC band is the only coupling. This is simultaneously the scalability argument and the
+privacy argument --- the coalition total is already on the meter.
+\end{enumerate}
+
+\subsection{Headline results}
+Over two independent ERCOT weeks (1--7 April and 7--13 July 2025; prices $-\$1$ to $\$3553$/MWh;
+$1344$ real-time steps):
+\begin{center}\small
+\begin{tabular}{ll}
+\toprule
+Iteration-free steps & $\mathbf{99.3\%}$ \ ($9$ fallbacks of $1344$)\\
+Communication on a map step & exactly $1$ decision broadcast per agent\\
+Median real-time step & $\mathbf{125}$~ms against a $900$~s dispatch interval\\
+Agreement with the centralized equilibrium & $\sim\!10^{-4}$~kW in the interior; $5.9$~kW worst case\\
+Combinations ever visited & $700$ of $K^N\approx1.1\times10^{21}$ \ ($6.5\times10^{-19}$)\\
+Weekly H$_2$ target & met at $140$--$141\%$\\
+Renewable curtailment & $5.8$--$6.8\%$ of available generation\\
+\bottomrule
+\end{tabular}
+\end{center}
+\S\ref{sec:limit} reports honestly that the residual degeneracy at the coupling ceiling --- not the
+fleet composition --- is what bounds the iteration-free rate, and \S\ref{sec:related} states which
+comparisons in this report are not yet on an equal footing.
+
+\section{Physical system and market}
+A cluster of small electrolyzers sits behind one shared PCC. Each owner runs its own asset for its
+own revenue and keeps its cost model private; only power decisions are shared. Two forces make this
+a game rather than $N$ independent problems:
+\begin{itemize}[nosep]
+\item \textbf{Physical coupling.} The PCC caps the collective import and a market floor sets a
+minimum offer, \emph{at every 15-min step $k$}:
+\[
+   L_{\min}=100\ \text{kW}\ \le\ \sum_{i=1}^{N} p_{i,k}\ \le\ L_{\max}=900\ \text{kW}.
+\]
+$L_{\min}$ is the ISO minimum offer size; $L_{\max}$ is the physical interconnection limit
+($75\%$ of the $1200$~kW fleet nameplate). \textbf{This same band governs both the day-ahead and the
+real-time stage} --- there is one physical wire.
+\item \textbf{Private hydrogen contracts.} Each agent must produce a daily H$_2$ quantity; it may
+time production freely but the daily total is a hard floor. That freedom, under a shared per-step
+power limit, is what couples the agents and the horizon.
+\end{itemize}
+The market is ERCOT two-settlement: a day-ahead (DAM, hourly) stage that sets a financial anchor
+$p^{\mathrm{DA}}$, and a real-time (RTM, 15-min SCED) stage that re-optimizes against live prices.
+Electricity $\to$ H$_2$ conversion: $\text{kg}=\eta_i\,p_{\mathrm{elec},i}\,\Delta t$, $\Delta t=0.25$~h.
+
+\section{The fleet (medium-scale)}
+\begin{table}[H]\centering
+\begin{tabular}{clcccccc}
+\toprule
+$i$ & Agent & type & $P_{\max,i}$ & farm cap & $\eta_i$ & $\gamma_i$ & break-even $a_i$\\
+ & & & [kW] & [kW] & [kg/kWh] & & [\$/MWh]\\
+\midrule
+0 & PEM\_Elec  & grid & 250 & --  & 0.0200 & $5\!\times\!10^{-3}$ & 60.0\\
+1 & ALK        & grid & 200 & --  & 0.0180 & $5\!\times\!10^{-3}$ & 54.0\\
+2 & PEM\_PV    & PV   & 150 & 125 & 0.0210 & $5\!\times\!10^{-3}$ & 63.0\\
+3 & PEM\_PV\_2 & PV   & 100 & 125 & 0.0190 & $5\!\times\!10^{-3}$ & 57.0\\
+4 & PEM\_Wind  & wind & 275 & 250 & 0.0195 & $4\!\times\!10^{-3}$ & 58.5\\
+5 & PEM\_Wind\_2 & wind & 225 & 250 & 0.0185 & $4\!\times\!10^{-3}$ & 55.5\\
+\bottomrule
+\end{tabular}
+\caption{$N=6$, total electrolyzer nameplate $\sum_i P_{\max,i}=1200$~kW against
+$L_{\max}=900$~kW, so the coupling ceiling binds. $r_{\mathrm{H2}}=\$3$/kg, $H=4$,
+$\Delta t=0.25$~h. $P_{\max,i}$ is the \emph{electrolyzer} rating; ``farm cap'' is the
+co-located renewable array, which is shared within a technology (both PV agents see the same
+irradiance $g_h=\mathrm{CF}_h\cdot125$~kW, both wind agents the same $\mathrm{CF}_h\cdot250$~kW).
+Break-even $a_i=r_{\mathrm{H2}}\eta_i\!\cdot\!10^3$: below $a_i$ buying grid power to make H$_2$
+is profitable, above it the agent wants to stop. \textbf{All six agents are distinct in
+$(P_{\max,i},\eta_i)$}, so all six $a_i$ are distinct and each agent requires its own offline
+solve. Agents 3 and 5 are inverter-limited ($\text{farm}>P_{\max}$) and therefore curtail
+$25$~kW at peak resource regardless of price.}
+\end{table}
+
+\begin{warnbox}{Distinct efficiencies remove one degeneracy but do not improve the iteration-free rate}
+An earlier version of this study used two \emph{identical} PV agents and two identical wind agents.
+Identical agents are ill-posed at the coupling ceiling in an obvious way: if agents $j$ and $k$ have
+the same cost and constraints, any split of their combined power is equally optimal, so a continuum
+of GNE exists. Making every $\eta_i$ distinct strictly orders the marginal H$_2$ values
+$a_i=r_{\mathrm{H2}}\eta_i$, so ``who backs off first'' has a unique answer and \emph{that}
+tie disappears by construction.
+
+\textbf{Measured, this alone did not help.} Holding the clearing algorithm fixed, the
+identical-pair fleet was $99.2\%$ iteration-free ($11/1344$ ADMM fallbacks) while the distinct
+fleet was $97.2\%$ ($37/1344$). Permutation symmetry was never the \emph{binding} source of
+degeneracy: per Hall \& Bemporad (Def.~2), $M_x$ loses rank whenever the \emph{shared coupling
+constraint} is active for two or more agents at once --- which happens regardless of whether those
+agents are identical. Removing the symmetry eliminated a secondary tie while the dominant one
+remained, and the distinct fleet additionally brought richer maps and a new degenerate surface
+(forced curtailment).
+
+\textbf{Fixing the real cause recovers it, in two steps.} The dominant degeneracy is handled by the
+feasibility-constrained variational selection of \S\ref{sec:facet} (Tier~1c), which addresses the
+shared constraint rather than the fleet: with it alone the distinct fleet reached $98.8\%$
+($16/1344$). A second, independent fix then closed the rest of the gap: the offline
+facet-neighbour graph feeding Tiers 1b/1c was itself badly incomplete (\S\ref{sec:facet},
+``\texttt{facet\_crossing}''); rebuilding it correctly brought the distinct fleet to
+\textbf{$99.3\%$ ($9/1344$)} --- matching the identical-pair fleet's $99.2\%$. \emph{Fleet
+composition was never the lever; equilibrium selection and a complete neighbour graph are.}
+\end{warnbox}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Day-Ahead stage: distributed ADMM (model-private)}\label{sec:dam}
+% ─────────────────────────────────────────────────────────────────────────────
+The day-ahead schedule is solved once per day on the DAM \emph{forecast}
+($\hat\lambda_h=\lambda^{\mathrm{DA}}_h+\mathcal N(0,16)$, renewable $\hat g_{i,h}$). It is
+\textbf{distributed}: each agent $i$ solves only its own 24-hour problem, and the \emph{only}
+exchanged quantity is the per-hour coalition import $\sum_i p_{i,h}$ (already public at the metered
+point). No agent reveals $P_{\max,i}$, $\eta_i$, its renewable cap, or its daily target.
+
+\paragraph{Per-agent day-ahead problem.} With $\Delta t_{\mathrm{DA}}=1$~h and daily target
+$D^{\mathrm{day}}_i=0.55\,P_{\max,i}\eta_i\!\cdot\!24$, agent $i$ solves
+\[
+\min_{p_{i,h}\ge0,\;cv_{i,h}\ge0}\ \sum_{h=0}^{23}\Big[(\hat\lambda_h/1000-r_{\mathrm{H2}}\eta_i)\,
+   \Delta t_{\mathrm{DA}}\,p_{i,h}+r_{\mathrm{H2}}\eta_i\,\Delta t_{\mathrm{DA}}\,cv_{i,h}
+   +\underbrace{\tfrac12\gamma_{\mathrm{DA}}\,p_{i,h}^2}_{\text{regularizer}}\Big]
+\]
+\[
+\begin{aligned}
+&0\le p_{i,h}\le P_{\max,i},\quad 0\le cv_{i,h}\le \mathrm{cap}_i \qquad\text{(local box; $cv$ only renewables)}\\
+&0\ \le\ p_{i,h}+\hat g_{i,h}-cv_{i,h}\ \le\ P_{\max,i} \qquad\text{(local renewable balance)}\\
+&\textstyle\sum_{h=0}^{23}\eta_i\,(p_{i,h}+\hat g_{i,h}-cv_{i,h})\,\Delta t_{\mathrm{DA}}\ \ge\ D^{\mathrm{day}}_i
+   \qquad\text{(hard daily H$_2$ floor)}
+\end{aligned}
+\]
+Every term uses only agent $i$'s own data; the daily H$_2$ floor couples that agent's own 24 hours.
+The \textbf{coupling band} $L_{\min}\le\sum_i p_{i,h}\le L_{\max}$ ($\forall h$) is the \emph{only}
+cross-agent constraint, enforced by ADMM consensus/dual updates that see nothing but the per-hour
+aggregate:
+\[
+\text{(x)}\ p_i^{\ell+1}=\arg\min\big[J_i(p_i)+\tfrac{\rho}{2}\|p_i-z_i^\ell\|^2\big],\quad
+\text{(z)}\ z^{\ell+1}=\Pi_{[L_{\min},L_{\max}]}\!\big(\textstyle\sum_i p_i^{\ell+1}+\mu^\ell/\rho\big),\quad
+\text{($\mu$)}\ \mu_i^{\ell+1}=\mu_i^{\ell}+\rho(p_i^{\ell+1}-z_i^{\ell+1}),
+\]
+with $\rho=0.1$; $\Pi$ is a closed-form clip of the per-hour aggregate onto the band. The award
+$p^{\mathrm{DA}}_{i,h}$ is the RTM anchor; its cumulative-H$_2$ trajectory sets the RTM pacing target
+$D_i(t)$. (\texttt{dam.solve\_dam\_admm}; consensus in \texttt{admm\_solver.py}.)
+
+\begin{keybox}{The small $\gamma_{\mathrm{DA}}$ regularizer (why, and its trade-off)}
+The day-ahead economics are \emph{linear} in each hourly buy: ``buy enough cheap power to make the
+day's hydrogen.'' With no $\gamma_{\mathrm{DA}}$ the problem is a degenerate LP --- on a cheap day it
+says \emph{buy the maximum every hour}, a knife-edge answer that ADMM oscillates on and cannot
+settle. A \emph{tiny} quadratic penalty $\tfrac12\gamma_{\mathrm{DA}}p_{i,h}^2$
+($\gamma_{\mathrm{DA}}=10^{-4}$) rounds the knife-edge: it spreads purchases smoothly, gives a
+\emph{unique} schedule so ADMM converges, and changes total cost by $\le\!1.4\%$. A matching
+$\varepsilon=10^{-3}$ regularizes renewable curtailment $cv$. Validation: a centralized solve of the
+\emph{same} regularized problem (offline oracle, \texttt{solve\_dam\_centralized}) is matched to
+$\le\!10$~kW on priced days; on ultra-flat days the day-ahead problem is genuinely degenerate so the
+two solvers land on different equally-optimal schedules ($\le\!23$~kW apart, cost within $1\%$).
+\end{keybox}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Real-Time stage: each agent's mpQP}
+% ─────────────────────────────────────────────────────────────────────────────
+Every RTM step, agent $i$ solves a strictly-convex mpQP over the horizon $k=0,\dots,3$. The decision
+is grid import $p_{i,k}\ge0$ (renewable agents additionally choose curtailment $cv_{i,k}$). The cost
+is a day-ahead deviation anchor $\tfrac12\gamma_i(p-p^{\mathrm{DA}}_i)^2$ (strict convexity,
+$Q_i\succ0$) plus real-time energy cost net of H$_2$ revenue. \textbf{Each agent's cost and every
+local constraint use only that agent's own parameters; the sole shared quantity is the aggregate
+$\mathrm{s}_k=\sum_{j\ne i}p_{j,k}$.}
+
+\subsection{Grid agents (PEM\_Elec $i{=}0$, ALK $i{=}1$)}
+\begin{agentbox}{Grid agent $i$ --- decision $x_i=[p_{i,0..3}]\in\mathbb R^4$}
+\textbf{Private parameters} $\theta_i=[\,\mathrm{s}_0..\mathrm{s}_3\mid D_i,\ \lambda_0..\lambda_3,\ p^{\mathrm{DA}}_i\,]\in\mathbb R^{10}$
+\[
+\min_{p_i\in\mathbb R^4}\ \sum_{k=0}^{3}\Big[\tfrac12\gamma_i\,(p_{i,k}-p^{\mathrm{DA}}_i)^2
+   +\big(\lambda_k/1000-r_{\mathrm{H2}}\eta_i\big)\,\Delta t\;p_{i,k}\Big]
+\]
+\vspace{-8pt}
+\[
+\begin{aligned}
+&0\le p_{i,k}\le P_{\max,i}, &&\text{(capacity box)}\\
+&\textstyle\sum_{k}\eta_i\,p_{i,k}\,\Delta t\ \ge\ D_i, &&\text{(cumulative H$_2$ --- couples the 4 steps)}\\
+&L_{\min}\ \le\ p_{i,k}+\mathrm{s}_k\ \le\ L_{\max}. &&\text{(shared per-step coupling)}
+\end{aligned}
+\]
+\end{agentbox}
+
+\subsection{Renewable agents (PEM\_PV $i{=}2,3$; PEM\_Wind $i{=}4,5$)}
+Renewable output $g_{i,k}$ feeds the electrolyzer load $p_{\mathrm{elec},i,k}=p_{i,k}+g_{i,k}-cv_{i,k}$
+(free renewable displaces grid import; curtailment $cv$ throws away H$_2$ at break-even).
+\begin{agentbox}{Renewable agent $i$ --- decision $x_i=[p_{i,0..3},\,cv_{i,0..3}]\in\mathbb R^8$}
+\textbf{Private parameters} $\theta_i=[\,\mathrm{s}_0..\mathrm{s}_3\mid D_i,\ \lambda_0..\lambda_3,\ p^{\mathrm{DA}}_i,\ g_0..g_3\,]\in\mathbb R^{14}$
+\[
+\min_{p_i,cv_i}\ \sum_{k=0}^{3}\Big[\tfrac12\gamma_i(p_{i,k}-p^{\mathrm{DA}}_i)^2+\tfrac12\varepsilon\,cv_{i,k}^2
+  +(\lambda_k/1000-r_{\mathrm{H2}}\eta_i)\Delta t\,p_{i,k}+r_{\mathrm{H2}}\eta_i\,\Delta t\,cv_{i,k}\Big]
+\]
+\vspace{-8pt}
+\[
+\begin{aligned}
+&0\le p_{i,k}\le P_{\max,i},\quad 0\le cv_{i,k}\le g_{i,k}\le\mathrm{cap}_i,\\
+&0\ \le\ p_{\mathrm{elec},i,k}=p_{i,k}+g_{i,k}-cv_{i,k}\ \le\ P_{\max,i},\\
+&\textstyle\sum_{k}\eta_i\,p_{\mathrm{elec},i,k}\,\Delta t\ \ge\ D_i,\qquad
+L_{\min}\ \le\ p_{i,k}+\mathrm{s}_k\ \le\ L_{\max}\ \text{(grid import only)}.
+\end{aligned}
+\]
+\end{agentbox}
+
+\paragraph{Receding-horizon coupling (not a repeated static game).} The four steps couple only
+through the cumulative-H$_2$ row. At an H$_2$-binding point (PEM, raise $\lambda_1$ by \$40/MWh):
+$\Delta p=[+0.5,-1.5,+0.5,+0.5]$~kW with $\sum_k p_k:600\to600$ (H$_2$-conserved). Step~1 becomes
+expensive so it drops; the others rise to keep the H$_2$ total --- a single-step map would give
+$\Delta p=\mathbf0$.
+
+\paragraph{Sum-compression and elimination.} Agent $i$ depends on the others only through the
+per-step aggregate $\mathrm{s}_k=\sum_{j\ne i}p_{j,k}$ (4 numbers), not their private
+$D_j,p^{\mathrm{DA}}_j,g_j$. Each agent's mpQP is solved offline (PPOPT) in its private $10$- or
+$14$-dimensional $\theta_i$; the coupling variable is eliminated when the coalition combination is
+assembled. Public parameter count is $4(\lambda)+6(p^{\mathrm{DA}})+6(D)+8(g)=24$, but no
+24-dimensional problem is ever solved.
+
+The daily pacing target is receding: $D_i(t)=\text{clip}\big((D^{\mathrm{day}}_i-h2^{\mathrm{inv}}_i)\,
+H/\text{steps left in day},\,0,\,D^{\max}_i\big)$; only step $k=0$ is executed against realized price
+and renewable, then the window advances.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Online FACET clearing of the RTM GNE}\label{sec:facet}
+% ─────────────────────────────────────────────────────────────────────────────
+Each agent's offline solution is an explicit piecewise-affine map: a set of \emph{critical regions}
+(CRs), each a polytope $E_i\theta_i\le f_i$ carrying an affine law $x_i=G_i\theta_i+g_i$. A
+\emph{combination} $\mathcal C=(r_0,\dots,r_5)$ picks one CR per agent; the equilibrium at combination
+$\mathcal C$ solves a block-linear system $M_x x = M_p\theta+M_1$. FACET finds and solves the correct
+combination online \textbf{without enumerating the $K^N\!\approx\!1.1\times10^{21}$ combinations}.
+
+\subsection{How FACET works, step by step}\label{sec:walkthrough}
+% ─────────────────────────────────────────────────────────────────────────────
+This subsection builds the online method from nothing, in the order the code executes it, and then
+runs two \emph{real} 15-minute steps end to end with the actual numbers. Every figure quoted is a
+live trace of the shipped code on 6~April 2025 --- none of it is illustrative.
+
+% ── 1 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{1. The question we must answer every 15 minutes}
+At each real-time step the market hands us $\theta$ --- $24$ public numbers: the four upcoming RT
+prices, the six agents' H$_2$ still owed, the six DAM awards, and the solar/wind available to each
+farm. From $\theta$ alone we must produce
+\[
+  x^\star=\bigl(x_0,\dots,x_5\bigr),\qquad x_i=\text{agent }i\text{'s power over the next 4 steps},
+\]
+such that \textbf{(a)} no agent can reduce its own cost by unilaterally changing its own $x_i$, and
+\textbf{(b)} the coalition respects the physical PCC band $L_{\min}\le\sum_i p_i\le L_{\max}$ at
+every step. That is a \emph{generalized Nash equilibrium}. The word ``generalized'' is doing real
+work: condition (b) couples the agents' \emph{feasible sets}, not merely their costs.
+
+The hard constraint on any method is \S\ref{sec:facet}'s privacy model: \textbf{no agent reveals its
+cost model}, so no party --- not even a hypothetical coordinator --- is able to write down the joint
+problem at runtime. Whatever we do must be assembled out of things each agent can compute alone.
+
+% ── 2 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{2. What each agent stores offline: a lookup table}
+Before the day begins, each agent $i$ solved \emph{its own} mpQP once, and stored the answer as a
+lookup table. The table has one row per \textbf{critical region} (CR). Each row holds
+\begin{center}\small
+\begin{tabular}{ll}
+\toprule
+a polytope & $E_i\,t_i\le f_i$ \quad --- ``does this row apply?''\\
+an affine law & $x_i=G_i\,t_i+g_i$ \quad --- ``if it applies, here is my exact optimum''\\
+\bottomrule
+\end{tabular}
+\end{center}
+\emph{Using} the table is not an optimization. It is a lookup with two operations: find the row whose
+polytope contains the query point $t_i$ (a containment test $E_it_i\le f_i$ --- pure arithmetic, no
+solver, no randomness), then evaluate one affine formula. The tables are big but they are only
+tables: $507$ rows for PEM\_Elec up to $12{,}782$ for PEM\_PV\_2, $35{,}348$ in total
+(Table~\ref{tab:cr}).
+
+We call the choice of one row per agent a \textbf{combination} $\mathcal C=(r_0,\dots,r_5)$. If we
+knew the right combination, we would be finished --- that is the entire point of having the tables.
+
+% ── 3 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{3. The one subtle part: what the query point contains}
+What is $t_i$ --- the key we look the table up with? It is \emph{not} just $\theta$:
+\[
+  t_i \;=\; \Bigl[\;\underbrace{\textstyle\sum_{j\ne i} p_j}_{\text{4 numbers}}
+  \;\Big|\;\underbrace{\theta}_{\text{24 numbers}}\;\Bigr]\;\in\;\mathbb R^{28}.
+\]
+Why does agent $i$'s own optimum depend on the others at all? \textbf{Only through the PCC band.}
+Agent $i$ may draw whatever it likes provided $\sum_j p_j$ stays inside $[L_{\min},L_{\max}]$ --- so
+the others constrain $i$ \emph{exclusively via their total}, never individually. That is why four
+numbers suffice (one per horizon step), and it is also the whole privacy argument: the coalition
+total is already visible at the PCC meter, so sharing it reveals nothing. Agent $i$ never sees any
+$P_{\max,j}$, $\eta_j$, or cost.
+
+This is also precisely what makes the problem a \emph{game} rather than six independent problems.
+
+% ── 4 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{4. The circularity --- the only genuinely hard part}
+\begin{warnbox}{The difficulty in one sentence}
+To look up my row I need $\sum_{j\ne i}p_j$. But $\sum_{j\ne i}p_j$ is part of the answer I am trying
+to compute. \textbf{The key depends on the value.}
+\end{warnbox}
+Everything else in FACET is machinery for breaking this circle without a central solver. If this
+subsection is confusing, it is almost certainly \emph{this} point that is the source --- the rest is
+bookkeeping around it.
+
+% ── 5 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{5. Breaking the circle: warm start $\to$ locate $\to$ solve $\to$ certify}
+The circle is broken by a \textbf{fixed-point iteration that carries its own proof of correctness}.
+
+\begin{algorithm}[H]
+\caption{One FACET clearing step (Tier 1). In: $\theta$, previous solution $x^{\mathrm{prev}}$,
+previous combination $\mathcal C^{\mathrm{prev}}$. Out: a certified GNE $x^\star$.}
+\label{alg:facet}
+\begin{algorithmic}[1]
+\State $x\gets x^{\mathrm{prev}}$;\quad $\mathcal C\gets\mathcal C^{\mathrm{prev}}$
+       \Comment{\textbf{warm start}: previous step's certified solution}
+\For{round $=1,\dots,4$}
+  \For{each agent $i=0,\dots,5$}\Comment{local \& parallel; no messages}
+    \State $t_i\gets\bigl[\;\sum_{j\ne i}p_j(x)\;\big|\;\theta\;\bigr]$
+       \Comment{form my key from the current iterate}
+    \State $r_i\gets\textsc{Locate}\bigl(t_i,\ \mathrm{hint}=\mathcal C_i\bigr)$
+       \Comment{\textbf{locate} --- which row holds $t_i$?}
+  \EndFor
+  \State $\mathcal C'\gets(r_0,\dots,r_5)$
+  \State $x'\gets\textsc{SolveExact}(\mathcal C',\theta)$
+       \Comment{\textbf{solve} --- $M_xx=M_p\theta+M_1$, all six at once}
+  \If{$\textsc{Locate}\bigl([\,\textstyle\sum_{j\ne i}p_j(x')\,|\,\theta\,]\bigr)=r_i$ for every $i$}
+    \State \Return $x'$
+       \Comment{\textbf{re-check passed} $\Rightarrow$ certified GNE; stop}
+  \EndIf
+  \State $x\gets x'$;\quad $\mathcal C\gets\mathcal C'$
+       \Comment{someone crossed a boundary --- iterate}
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\medskip
+Before any example, here is \textbf{every line of Algorithm~\ref{alg:facet}, with the exact operation
+it performs}. Throughout, $x\in\mathbb R^{40}$ is the stacked decision vector and $\theta\in\mathbb
+R^{24}$ the public data:
+\begin{center}\small
+\begin{tabular}{clcl}
+\toprule
+$i$ & agent & $n_{x_i}$ & block $x_i$ and its slot in $x$\\
+\midrule
+$0$ & PEM\_Elec    & $4$ & $p_i\in\mathbb R^{4}$ \hfill $x[0{:}4]$\\
+$1$ & ALK          & $4$ & $p_i\in\mathbb R^{4}$ \hfill $x[4{:}8]$\\
+$2,3$ & PEM\_PV, PEM\_PV\_2     & $8$ & $[\,p_i\,;\,cv_i\,]\in\mathbb R^{8}$ \hfill $x[8{:}16]$, $x[16{:}24]$\\
+$4,5$ & PEM\_Wind, PEM\_Wind\_2 & $8$ & $[\,p_i\,;\,cv_i\,]\in\mathbb R^{8}$ \hfill $x[24{:}32]$, $x[32{:}40]$\\
+\midrule
+\multicolumn{4}{l}{$n_x^{\mathrm{tot}}=2\cdot4+4\cdot8=\mathbf{40}$,\qquad $n_\theta=\mathbf{24}$,\qquad $H=4$}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Line 1 --- the warm start ($x\gets x^{\mathrm{prev}}$, $\mathcal C\gets\mathcal C^{\mathrm{prev}}$).}
+We begin from the previous 15-minute step's certified answer and the rows it used. \emph{At the very
+first step of a day there is no previous step}: the code seeds $x$ with the DAM award,
+$p_i(k)\gets p_{\mathrm{DA},i}$ for every $k$, and sets $\mathcal C\gets\varnothing$ --- so line 5 has
+no hint and performs a full scan exactly once per day. Every later step inherits the previous one.
+
+\paragraph{Line 2 --- the round loop.}
+At most 4 rounds. One point is essential and easy to miss: \textbf{$\theta$ is fixed for the whole
+loop.} It is the data of \emph{this} step and does not change between rounds. The \emph{only} thing
+that changes from round to round is the iterate $x$, and therefore the aggregates $s_i$ built from it.
+
+\paragraph{Line 3 --- the per-agent loop.}
+Every agent executes lines 4--5 on its own hardware, in parallel, using only its own table. No
+messages are exchanged inside the loop.
+
+\paragraph{Line 4 --- form the lookup key, $t_i\gets[\,\sum_{j\ne i}p_j(x)\;|\;\theta\,]$.}
+Two concatenated pieces. First the aggregate of everyone else, read off the \emph{current iterate} $x$:
+\[
+  s_i \;=\; \sum_{j\ne i}p_j\;=\;\sum_{j\ne i} S\,x_j\;\in\;\mathbb R^{4},
+  \qquad S x_j := \text{first } H{=}4 \text{ entries of } x_j\ (\text{the grid-import part}),
+\]
+(for renewable agents $S$ discards the curtailment block $cv_j$ --- only imported grid power crosses
+the PCC). Then $\theta$ is appended:
+\[
+  t_i=\bigl[\,s_i\;;\;\theta\,\bigr]\in\mathbb R^{4+24}=\mathbb R^{28}.
+\]
+\textbf{Which $\theta$ is this?} \emph{This step's} $\theta$ --- rebuilt from scratch at every RTM
+step out of the current market data: the new RT prices $\lambda_{\mathrm{RT}}$, the freshly updated
+H$_2$ still owed $D_i$, the current solar/wind availability $g$, and (on the hour) the new DAM award
+$p_{\mathrm{DA}}$. It is \emph{public} and therefore identical for all six agents; only the first four
+entries of $t_i$ differ between agents. And per line 2, it is constant across rounds.
+
+\paragraph{Line 5 --- locate, $r_i\gets\mathrm{Locate}(t_i,\ \mathrm{hint}=\mathcal C_i)$.}
+The question asked is only: \emph{which row $r$ of my table satisfies $E_r\,t_i\le f_r$?} The
+procedure is
+\begin{enumerate}[leftmargin=1.8em,nosep,label=(\alph*)]
+\item test the hint row: if $\max(E_{\mathcal C_i}t_i-f_{\mathcal C_i})\le\varepsilon$, return $\mathcal C_i$;
+\item else test the hint's facet neighbours, return the first that contains $t_i$;
+\item else scan all rows with one batched matrix product,
+      $\mathrm{viol}=\max_{\text{rows}}\bigl(\mathbf E\,t_i-\mathbf f\bigr)$, and return the first
+      index with $\mathrm{viol}\le\varepsilon$.
+\end{enumerate}
+
+\begin{keybox}{What ``hint'' means on line 5 --- and why it is safe}
+The \textbf{hint} is simply \emph{the row this agent used last time}: on round 1 it is the row from
+the previous 15-minute step; on rounds $2,3,4$ it is the row found in the previous round. It is
+carried in $\mathcal C$.
+
+The hint is \textbf{purely a speed device --- it cannot change the answer, only the time taken to find
+it.} Whenever $t_i$ lies strictly inside a region, that region is the unique one containing it, so
+(a), (b) and (c) all return the same row. If $t_i$ lands exactly on a shared facet, two rows contain
+it and (a)--(c) may return different indices --- but the piecewise-affine map is \emph{continuous}, so
+both rows' affine laws produce the identical $x_i$. Either answer is correct.
+
+This is why the warm start can never corrupt the result: a bad hint costs a few wasted containment
+tests, never a wrong equilibrium. Measured: the hint alone answers $86.1\%$ (April) / $77.3\%$ (July)
+of lookups --- one test against $19$--$49$ inequality rows (\S9).
+\end{keybox}
+
+\paragraph{Line 7 --- assemble the combination, $\mathcal C'\gets(r_0,\dots,r_5)$.}
+Pure bookkeeping: collect the six located row indices into one tuple.
+
+\paragraph{Line 8 --- \texttt{SolveExact}: the line where the coupling is resolved.}
+This is the heart of the method, so it is worth deriving rather than asserting. Row $r_i$ of agent
+$i$'s table states its \emph{exact} optimum as an affine function of its key:
+\[
+  x_i \;=\; G_i\,t_i + g_i .
+\]
+Split $G_i$ at column $H{=}4$, matching the two pieces of $t_i$:
+\[
+  G_i=\bigl[\,\underbrace{G_i^{s}}_{n_{x_i}\times4}\;\big|\;\underbrace{G_i^{\theta}}_{n_{x_i}\times24}\,\bigr]
+  \qquad\Longrightarrow\qquad
+  x_i \;=\; G_i^{s}\,s_i \;+\; G_i^{\theta}\,\theta \;+\; g_i .
+\]
+Now substitute what $s_i$ actually is --- a linear function of the \emph{other agents' unknowns},
+$s_i=\sum_{j\ne i}S\,x_j$ --- and move it to the left:
+\begin{equation}
+  \boxed{\;x_i \;-\; G_i^{s}\!\!\sum_{j\ne i}S\,x_j \;=\; G_i^{\theta}\,\theta + g_i\;}
+  \qquad\text{one block row, for each } i=0,\dots,5 .
+  \label{eq:blockrow}
+\end{equation}
+Equation~\eqref{eq:blockrow} is the essential step: the circularity of \S4 has become an ordinary
+\emph{linear} coupling, because inside a known combination every agent's response is affine. Stacking
+the six block rows gives
+\[
+  M_x\,x \;=\; M_p\,\theta + M_1,
+\]
+\[
+  \underbrace{\bigl[M_x\bigr]_{ii}=I_{n_{x_i}}}_{\text{``what I do with my own }x_i\text{''}},\qquad
+  \underbrace{\bigl[M_x\bigr]_{ij}=-\,G_i^{s}S\ \ (j\ne i)}_{\text{``how }j\text{'s import pulls me''}},\qquad
+  \bigl[M_p\bigr]_{i}=G_i^{\theta},\qquad
+  \bigl[M_1\bigr]_{i}=g_i,
+\]
+with $M_x\in\mathbb R^{40\times40}$, $M_p\in\mathbb R^{40\times24}$, $M_1\in\mathbb R^{40}$. The
+$-G_i^sS$ block sits in the first four columns of agent $j$'s slot --- the only columns $i$ can
+\emph{see}. Read structurally, $M_x=I-(\text{coupling})$. \textbf{Six mutually-dependent best
+responses have collapsed into one linear solve that returns all six agents' decisions at once} --- no
+iteration, no message, no tolerance.
+
+\smallskip
+\emph{Generic case ($M_x$ invertible).} $x'=M_x^{-1}(M_p\theta+M_1)$: the unique GNE of this
+combination. Example~A is this case ($40\times40$, rank $40$).
+
+\smallskip
+\emph{Degenerate case ($M_x$ singular).} Example~B is this case (rank $36$). It happens when the PCC
+band binds for several agents simultaneously: their laws all reduce to ``I take whatever the band
+leaves me'', so the block rows become linearly dependent. The solutions then form a
+$\bigl(40-\mathrm{rank}\,M_x\bigr)$-dimensional \emph{manifold}, obtained from the SVD of $M_x$:
+\[
+  x = x_p + V_2\,y_2,\qquad V_2=\text{null-space basis of }M_x,\qquad y_2\in\mathbb R^{40-\mathrm{rank}M_x}.
+\]
+Every point on it is a GNE. We select the \textbf{variational} one --- the social optimum --- by
+minimizing the coalition potential $\Phi$ over the manifold:
+\[
+  y_2^\star=\arg\min_{y_2}\ \Phi\bigl(x_p+V_2y_2\bigr),\qquad
+  \Phi(x)=\tfrac12x^\top Qx+q^\top x,\quad q=c+F\theta,
+\]
+which is a tiny unconstrained QP of dimension $1$--$4$, solved from its normal equations
+\[
+  \bigl(V_2^\top QV_2\bigr)\,y_2 \;=\; -\,V_2^\top\bigl(Qx_p+q\bigr).
+\]
+This is why a plain \texttt{numpy.linalg.solve} is not enough: on Example~B it would simply fail.
+(When even this selection leaves the feasible set, Tier~1c re-imposes the joint feasibility rows on
+the same minimization --- see the keybox in \S\ref{sec:facet}.)
+
+\paragraph{Line 9 --- the re-check (the acceptance test).}
+Take the freshly computed $x'$, recompute each agent's aggregate \emph{from it},
+$s_i'=\sum_{j\ne i}S\,x_j'$, rebuild $t_i'=[\,s_i'\,;\,\theta\,]$ --- note $\theta$ is unchanged, only
+the aggregate is new --- and locate once more. Accept \textbf{only} if all six agents return the same
+rows $r_i$ they were assumed to be in. \S6 explains why passing this test is a proof.
+
+\paragraph{Line 10 --- return.} The combination reproduced itself: $x'$ is a certified GNE. Stop.
+
+\paragraph{Line 12 --- iterate.} At least one agent's key crossed a facet, so the affine laws used to
+build $x'$ were the wrong ones. Adopt $x'$ as the next iterate and repeat. In practice this
+converges immediately: on 6~April, $82$ of $96$ steps passed on round 1, $12$ needed 2, one needed 3,
+one needed 4.
+
+\begin{warnbox}{Honesty: the loop is not guaranteed to converge}
+Nothing above proves the fixed point is reached, and it is not always. That is exactly why the round
+count is capped at 4 and why Tiers~1b/1c/2 exist. What \emph{is} guaranteed is soundness, not
+completeness: line 9 never accepts a wrong answer, so a failure to converge costs a fallback, never a
+silently incorrect dispatch. Over both weeks the loop closes on $99.3\%$ of steps.
+\end{warnbox}
+
+% ── 6 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{6. Why self-consistency certifies a generalized Nash equilibrium}
+Suppose the loop returns $x'$. The test that let it return says: \emph{when every agent recomputes
+its key from the aggregate that $x'$ actually produces, it lands in the very row that was used to
+compute $x'$.} Since that row's affine law \emph{is} agent $i$'s exact optimum for that key, each
+$x_i'$ is agent $i$'s exact best response to the aggregate that actually materializes. That is the
+definition of a generalized Nash equilibrium --- so a self-consistent combination is not
+``close enough'', it \textbf{is} the equilibrium.
+
+This also explains why nothing may be accepted without the test. A combination that has not
+reproduced itself is a combination whose affine laws were evaluated at a key that never occurred;
+its output is meaningless, however plausible the numbers look. Example B below is exactly this trap.
+
+% ── 7 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{7. Example A --- an ordinary step (\textit{t}=1, 00:15): one round}
+Market data: prices $\lambda_{\mathrm{RT}}=[11.84,\,11.28,\,13.63,\,13.58]$~\$/MWh (cheap night), no
+sun ($g_s=0$), wind $g_w=168.7$~kW, DAM awards $p_{\mathrm{DA}}=[250,200,150,100,75,25]$~kW.
+Warm start: last step's $\Sigma p=805.67$~kW at combination $(369,325,4001,9222,8,14)$.
+
+\textbf{Locate.} Each agent forms its own key and tests rows:
+\begin{center}\small
+\begin{tabular}{clcccc}
+\toprule
+$i$ & agent & $\sum_{j\ne i}p_j$ (kW) & row found & \#\,ineq. & $\max(E_it_i-f_i)$\\
+\midrule
+0 & PEM\_Elec   & $555.67$ & $369$ / $507$    & $19$ & $-2.6\times10^{-8}$\\
+1 & ALK         & $605.67$ & $325$ / $507$    & $19$ & $+8.5\times10^{-7}$\\
+2 & PEM\_PV     & $655.67$ & $4001$ / $5613$  & $39$ & $+9.5\times10^{-8}$\\
+3 & PEM\_PV\_2  & $705.67$ & $9222$ / $12782$ & $44$ & $-2.9\times10^{-7}$\\
+4 & PEM\_Wind   & $727.74$ & $8$ / $5613$     & $49$ & $-3.7\times10^{-1}$\\
+5 & PEM\_Wind\_2& $777.93$ & $14$ / $10326$   & $45$ & $-4.2\times10^{-1}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+The last column is the containment test: $\le0$ means the key sits inside that polytope. All six are
+inside, giving $\mathcal C'=(369,325,4001,9222,8,14)$.
+
+\textbf{Solve.} $M_x$ is $40\times40$ of \textbf{rank 40 --- full rank, so a unique GNE}:
+\[
+  p_i(k{=}0)=[250.00,\;200.00,\;150.00,\;100.00,\;77.92,\;27.73]\ \text{kW},\qquad
+  \Sigma p=805.64\ \text{kW}\in[100,900].
+\]
+
+\textbf{Re-check.} Re-locating at this $x'$ returns $(369,325,4001,9222,8,14)$ --- identical.
+Certified in one round. Against the offline centralized oracle,
+$\lVert x-x_{\mathrm{cent}}\rVert_\infty=9.0\times10^{-8}$~kW. (Sanity: at $\$12$/MWh power is cheap,
+so the four grid/PV agents simply sit at their DAM awards.)
+
+% ── 8 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{8. Example B --- a boundary crossing (\textit{t}=20, 05:00): two rounds}
+This is the case worth studying, and it shows the re-check earning its place. Prices have risen to
+$\lambda_{\mathrm{RT}}\approx26.9$~\$/MWh and wind has fallen to $g_w=110.4$~kW. Warm start:
+$\Sigma p=892.42$~kW at combination $(506,506,9,12,10,1)$ --- already within $7.6$~kW of the
+$L_{\max}=900$~kW ceiling.
+
+\textbf{Round 1 --- locate.} From the warm start: $\mathcal C'=(366,314,9,12,10,1)$. Note agents 0
+and 1 land in \emph{different} rows than the warm combination: $\theta$ moved since the last step, so
+their keys moved too.
+
+\textbf{Round 1 --- solve.} $M_x$ is $40\times40$ of \textbf{rank 36 --- rank-deficient, nullity 4}.
+The coupling binds for several agents at once, so there is no longer a single equilibrium but a
+\textbf{4-dimensional manifold} of them (this is the degeneracy of \S\ref{sec:limit}; a plain
+\texttt{solve} would fail outright here). The potential-minimizing selection picks the social optimum
+from that manifold:
+\[
+  p_i(k{=}0)=[212.71,\;153.38,\;141.03,\;90.73,\;176.07,\;126.07],\qquad
+  \Sigma p=\mathbf{900.00}\ \text{kW}=L_{\max}\ \text{exactly}.
+\]
+
+\textbf{Round 1 --- re-check: FAILS.} Re-locating returns $(506,506,9,12,10,1)$: agents 0 and 1 are
+\emph{not} in the rows we assumed. Rejected.
+
+\textbf{Round 2.} Iterate with the new $x$. Locate $\to(506,506,9,12,10,1)$, whose $M_x$ has
+\textbf{rank 40 --- full rank, unique GNE}:
+\[
+  p_i(k{=}0)=[211.33,\;152.00,\;141.03,\;90.73,\;176.07,\;126.07],\qquad
+  \Sigma p=897.23\ \text{kW}.
+\]
+Re-check returns $(506,506,9,12,10,1)$ --- identical. Certified.
+$\lVert x-x_{\mathrm{cent}}\rVert_\infty=4.4\times10^{-9}$~kW.
+
+\begin{keybox}{What Example B teaches}
+Round 1's answer \emph{looked} perfect: jointly feasible, ceiling respected, $\Sigma p$ sitting
+exactly at $L_{\max}=900$~kW. It was nevertheless \textbf{wrong}, because pushing the aggregate to
+$900$~kW moved agents 0 and 1 out of the very rows whose affine laws had been used to compute it ---
+the laws were evaluated at a key that never occurred. Only the re-check exposes this. Cost of the
+whole episode: two lookups and two $40\times40$ linear solves, all local, and still
+\textbf{one broadcast for the step}.
+\end{keybox}
+
+% ── 9 ────────────────────────────────────────────────────────────────────────
+\subsubsection*{9. ``If I already know last step's combination, why locate at all?''}
+A fair objection, and the answer is measured rather than argued. We \emph{do} reuse it --- but not as
+the answer, only as the \textbf{hint}: \textsc{Locate} tests the hinted row \emph{first} and returns
+immediately if the key is still inside it. So when nothing has changed, ``locating again'' costs
+\textbf{exactly one containment test} ($19$--$49$ inequality rows), not a scan of $12{,}782$ rows.
+
+But the previous combination is the answer for the \emph{previous} $\theta$. Between steps the prices,
+the wind, the H$_2$ still owed and (on the hour) the DAM award all move, so every key moves and may
+cross a facet. Measured over two full days:
+
+\begin{center}\small
+\begin{tabular}{lcc}
+\toprule
+ & 6 April & 9 July\\
+\midrule
+Final combination \textbf{unchanged} from previous step & $66/95$ \ ($69.5\%$) & $57/95$ \ ($60.0\%$)\\
+Final combination \textbf{changed}                      & $29/95$ \ ($30.5\%$) & $38/95$ \ ($40.0\%$)\\
+\textbf{Unverified reuse} (skip locating) would \textbf{fail}& $\mathbf{29/95}$ \ $(\mathbf{30.5\%})$ & $\mathbf{28/95}$ \ $(\mathbf{29.5\%})$\\
+\midrule
+\multicolumn{3}{l}{\emph{Where the lookup found the row (round 1; $576$ agent-lookups/day):}}\\
+\quad hint hit --- one test        & $496$ \ ($86.1\%$) & $445$ \ ($77.3\%$)\\
+\quad facet-neighbour of the hint  & $6$ \ ($1.0\%$)    & $38$ \ ($6.6\%$)\\
+\quad full vectorized scan         & $74$ \ ($12.8\%$)  & $93$ \ ($16.1\%$)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+So the previous row remains valid $\sim\!86\%$ of the time --- and the one cheap test is exactly what tells us
+\emph{which} case we are in. Simply assuming last step's combination fails on $\sim\!30\%$ of steps.
+Note also that ``locate again'' and ``verify the previous combination is still valid'' are the
+\emph{same operation}: there is no cheaper check being skipped.
+
+One further reading of that table matters. Of the $80$ April lookups that missed the hint, only $6$
+landed on a facet \emph{neighbour} --- the other $74$ ($92.5\%$) needed a full scan. When an agent's
+row changes, the new row is usually \textbf{not adjacent} to the old one.
+
+% ── 10 ───────────────────────────────────────────────────────────────────────
+\subsubsection*{10. ``Why not just walk the neighbour graph, as in FACET-DiMPC?''}
+Because of what \S9's last paragraph and Example B both show. A neighbour walk assumes the
+combination moves \emph{locally}: the parameter shifts slightly, you cross one facet, the new
+combination is one hop away. That holds when the solution is unique and varies continuously --- the
+cooperative DiMPC setting the walk was designed for. At a rank-deficient ceiling it does not: the
+selection can jump across the manifold, and consecutive combinations end up graph-far apart. In
+Example B agents 0 and 1 jumped from rows $(366,314)$ to $(506,506)$ in a single step. Point location
+is indifferent to graph distance --- it goes straight to the right row in one containment test.
+
+Head-to-head on 6~April, same seed, neither method allowed an ADMM fallback:
+\begin{center}\small
+\begin{tabular}{lcc}
+\toprule
+& facet-neighbour walk only & point location (Tier 1)\\
+\midrule
+Steps solved & $77/95$ \ ($81.1\%$) & $\mathbf{94/95}$ \ $(\mathbf{98.9\%})$\\
+Combinations solved per step & mean $776$, max $4000$ & mean $\mathbf{1.2}$, max $4$\\
+Worst $\lVert x-x_{\mathrm{cent}}\rVert_\infty$ on solved steps & $28.2$~kW & $\mathbf{9.2\times10^{-5}}$~kW\\
+\bottomrule
+\end{tabular}
+\end{center}
+The last row matters as much as the first: when the walk \emph{does} land on a combination, it
+sometimes lands on a \emph{different equilibrium} $28$~kW from the social optimum. The walk is
+retained as a backup (Tier~1b) because it does rescue occasional steps point location misses, and its
+graph is load-bearing for the min-potential refinement that runs on \emph{every} step --- but it is
+not the primitive that does the work in this game. (One day, $95$ steps, one seed; the walk arm is our
+re-implementation of the ACC-2026 scheme, capped at 3 hops / $4000$ combinations.)
+
+% ── 11 ───────────────────────────────────────────────────────────────────────
+\subsubsection*{11. What happens when the loop does not close}
+On 6~April the loop above certified \textbf{82 of 96 steps in a single round}; $12$ took two rounds,
+one took three, one took four. Across both full weeks it clears $99.3\%$ of steps. The remaining
+$0.7\%$ sit at genuinely degenerate ceiling vertices, and are handled by the backups summarized
+next: the facet-neighbour walk (Tier~1b), the feasibility-constrained variational solve (Tier~1c),
+and --- last and rarest --- a warm-started ADMM fallback (Tier~2), the only part of the method that
+iterates between agents. The keybox below is the compressed statement of all of it.
+
+\begin{keybox}{The FACET method (what runs every 15-minute step)}
+\begin{enumerate}[leftmargin=1.6em,nosep]
+\item \textbf{Per-agent point-location (warm-started).} Each agent locates its own CR at
+$[\mathrm{s}_i;\theta]$ using the \emph{previous} step's CR as a hint: test that CR and its
+facet-neighbours first (\,mean $5.9$--$8.9$ neighbours/CR, see below\,); only on a miss does a
+vectorized scan over that agent's own CRs run. This is per-agent (thousands of CRs), never over
+combinations.
+\item \textbf{Self-consistent coalition combination.} Assemble the located CRs into a combination;
+re-locate each agent given the others' aggregate and iterate to a fixed point --- a genuine GNE
+(each agent best-responding to the shared aggregate).
+\item \textbf{Variational-GNE solve.} Solve $M_x x=M_p\theta+M_1$ by the \emph{potential-minimizing}
+selection: when the coupling binds for $\ge2$ agents $M_x$ is rank-deficient (a manifold of
+equilibria); we pick the one minimizing the coalition potential $\sum_i J_i$ = the variational GNE =
+social optimum (matches the centralized oracle). A plain solve would fail on that singular system.
+\item \textbf{Facet-neighbour walk (backup).} If the located combination is not yet a strict
+equilibrium, walk the combination's facet-neighbour graph (1st/2nd/3rd neighbour) for the closest
+valid one; a 1-hop min-potential refinement locks the variational combination. The graph itself is
+built offline by \emph{physically crossing every facet} (\texttt{facet\_crossing}, below) rather than
+matching hyperplane coefficients --- see the keybox after Table~\ref{tab:cr}.
+\item \textbf{Feasibility-constrained variational solve (Tier 1c).} If steps 1--4 accept nothing,
+re-solve the best located combination with the joint feasibility rows \emph{imposed on the
+selection}: pick $y_2$ by $\min_{y_2}\Phi(x_p+V_2y_2)$ s.t.\ $G(x_p+V_2y_2)\le w_0+W\theta$, the
+role of the paper's Eq.~(9b) in this sum-compressed formulation. This is a tiny QP --- its dimension
+is the nullity of $M_x$, typically $1$--$4$ --- and purely local, so the step still costs one
+broadcast. Recovers the v-GNE to $\sim\!10^{-3}$~kW at a $\sim\!10^{-13}$ feasibility residual;
+measured on the (then-incomplete) hash-based neighbour graph it rescued $21$ of the $37$ would-be
+fallbacks ($97.2\%\!\to\!98.8\%$). Combined with the subsequent \texttt{facet\_crossing} graph fix
+below, the two together reach $99.3\%$ ($9/1344$).
+\item \textbf{ADMM fallback (rare; the only iteration).} If steps 1--5 fail --- only at genuinely
+degenerate ceiling vertices --- fall back to a warm-started distributed ADMM solve. Its result is
+used only if it converges; a non-converged result never becomes a warm start.
+\end{enumerate}
+All of steps 1--5 are \emph{local computation on the onboard maps}: the inter-agent exchange is
+\textbf{exactly one decision broadcast per agent per step}, regardless of how many local checks run.
+\end{keybox}
+
+\begin{warnbox}{Why the selection is constrained only in Tier 1c, never in steps 3--4}
+The constraint in Tier~1c must \textbf{not} be folded into the ordinary variational solve of step 3.
+In steps 3--4 the \emph{unconstrained} selection's infeasibility is a load-bearing signal: it is how
+the search learns that a candidate combination is wrong and keeps walking. Constraining the solve
+everywhere manufactures a feasible-looking point at wrong combinations, so the walk stops early on
+them --- measured, that raised fallbacks on the four worst days from $7/3/4/0$ to $15/35/29/17$ and
+\texttt{map=cent} from $\sim\!3$~kW to $12$--$22$~kW. Constraining with the CR-membership rows
+$E_i\theta_i\le f_i$ instead of the joint feasibility rows fails the same way, by forcing the point
+onto the combination's CR corner. Tier~1c is safe precisely because it runs \emph{only} on steps that
+would otherwise iterate, where the search has already exhausted its candidates.
+\end{warnbox}
+
+\begin{keybox}{Privacy model (no centralized optimizer at either stage)}
+Agents share \textbf{only their bidding decisions, never their cost models} --- in both the DAM
+(\S\ref{sec:dam}) and the RTM (\S\ref{sec:facet}). Consequently no party can solve the joint problem
+at runtime. A centralized QP is used \textbf{only offline} to certify accuracy (map $=$ centralized)
+and to bound an iterative solver's round count; it is never in the loop.
+\end{keybox}
+
+\subsection{The multiparametric maps (built once, offline)}
+Each agent's RTM mpQP is solved \emph{once, offline} in its private parameter space $\theta_i$ by a
+combinatorial multiparametric-QP solver (PPOPT). The result is the explicit piecewise-affine map:
+a set of critical regions (CRs), each a polytope $E_i\theta_i\le f_i$ carrying an affine control law
+$x_i=G_i\theta_i+g_i$. Because every agent differs in $(P_{\max,i},\eta_i)$, \textbf{six distinct
+solves} are required, one per agent, each then expanded into its own slot of the public
+parameter vector. Crucially, the private
+$\theta_i$ box spans the \emph{full} operating range of every parameter --- price
+$\lambda\in[-50,300]$, day-ahead anchor $p^{\mathrm{DA}}_i\in[0,P_{\max,i}]$, demand
+$D_i\in[0,D^{\max}_i]$, renewable $g$ --- so the \emph{same} maps are valid for \emph{every} day and
+\emph{every} DAM anchor. \textbf{The RTM maps are therefore built exactly once, never rebuilt}; only
+the day-ahead ADMM runs daily.
+
+\begin{table}[H]\centering
+\begin{tabular}{llcclr}
+\toprule
+Agent & type & $\dim\theta_i$ & stack/farm [kW] & decision $x_i$ & CRs\\
+\midrule
+PEM\_Elec   & grid      & 10 & $250/$--    & $[p_{0..3}]\in\mathbb R^4$           & 507\\
+ALK         & grid      & 10 & $200/$--    & $[p_{0..3}]\in\mathbb R^4$           & 507\\
+PEM\_PV     & renewable & 14 & $150/125$   & $[p_{0..3},cv_{0..3}]\in\mathbb R^8$ & 5{,}613\\
+PEM\_PV\_2  & renewable & 14 & $100/125$   & $[p_{0..3},cv_{0..3}]\in\mathbb R^8$ & 12{,}782\\
+PEM\_Wind   & renewable & 14 & $275/250$   & $[p_{0..3},cv_{0..3}]\in\mathbb R^8$ & 5{,}613\\
+PEM\_Wind\_2& renewable & 14 & $225/250$   & $[p_{0..3},cv_{0..3}]\in\mathbb R^8$ & 10{,}326\\
+\midrule
+\textbf{Total} & & & & & \textbf{35{,}348} (6 distinct solves)\\
+\bottomrule
+\end{tabular}
+\caption{Offline multiparametric maps: per-agent critical-region counts. Each agent solves its own
+$10$- or $14$-dimensional mpQP; $\theta_i$ is compressed by the coupling ``sum'' variable so no
+$24$-dimensional problem is ever solved. One-time offline cost $\approx\!26$~min for all six solves
+(12-core, exhaustive combinatorial mpQP); the facet-neighbour graph (\texttt{facet\_crossing},
+\S\ref{sec:facet}) adds $\approx\!16$~min, giving $285{,}887$ neighbour pairs with \textbf{zero}
+CRs left without a recorded neighbour.
+\textbf{Generated once} and reused for both entire weeks.
+\newline\textbf{Map size tracks the stack/farm ratio, not capacity.} The two agents whose stack
+exceeds their farm ($150/125$, $275/250$) yield $5{,}613$ CRs each: once the array saturates, the
+converter ceiling $p+g-cv\le P_{\max}$ can no longer bind, and a whole family of active sets
+vanishes. The two inverter-limited agents ($100/125$, $225/250$) instead yield $12{,}782$ and
+$10{,}326$: their stack ceiling and curtailment bounds bind over a much wider slice of parameter
+space. The effects nearly cancel, so moving from $4$ shared solves to $6$ distinct ones grows the
+total map by only $9\%$ ($32{,}402\to35{,}348$).}
+\label{tab:cr}
+\end{table}
+
+\begin{keybox}{Finding facet neighbours: why hyperplane-matching fails at this CR count}
+Two standard methods identify facet-adjacent CRs by matching normalized hyperplane coefficients
+between region pairs: a hash bucket (fast, used in an earlier build of these maps) or, per the
+FACET-DiMPC paper (ACC 2026, Eq.~14) this method builds on, an exhaustive pairwise LP scan. Both
+require the shared boundary to be represented \emph{algebraically identically} by both regions'
+constraint rows. Ground-truthed against physically crossing each facet (below): the hash method
+recovered only $\sim\!12\%$ of the true neighbour count on this fleet's maps, leaving most CRs with
+far too few recorded neighbours --- despite CRs geometrically tiling the parameter space (every
+full-dimensional CR must have $\ge1$ neighbour, except at the $\theta$-box boundary). The pairwise
+LP scan is exact but is $O(n_{cr}^2)$: at our largest agent's $12{,}782$ CRs that is $81.7$~million
+pairs, versus $\lesssim\!1000$ CRs in the DiMPC case studies the method was validated on --- a
+$\sim\!164\times$ blow-up in pair count that would take hours-to-days per agent, not minutes.
+
+\textbf{Fix: \texttt{facet\_crossing}.} For each CR, find its Chebyshev centre (interior point, via
+LP), then for every facet step a small distance across it along the outward normal and
+\emph{point-locate} the crossing point among the agent's other CRs (the same vectorized machinery
+Tier 1 uses). Landing strictly inside another CR proves a genuine neighbour by direct construction
+--- no hyperplane-coefficient matching, hence no sensitivity to how PPOPT happened to represent a
+shared boundary algebraically. Cost is $O(n_{cr}\cdot F)$: $\approx\!16$~min for all six agents,
+versus an estimated $4$ hours (hash-equivalent exhaustive scan) to several days (LP) per agent.
+Validated: \textbf{zero} CRs left without a recorded neighbour across all six agents (was
+$\sim\!40$--$88\%$ zero-neighbour CRs under the hash method), $285{,}887$ total pairs (was $30{,}284$).
+\end{keybox}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Results --- two 7-day runs (ERCOT 2025)}
+% ─────────────────────────────────────────────────────────────────────────────
+Both weeks use the full $[100,900]$ band at both stages and the deployed FACET clearing
+(1 broadcast/step). ``map $=$ cent'' is the max over the certified steps of
+$\|x_{\mathrm{FACET}}-x_{\mathrm{centralized}}\|_\infty$; ``fallbacks'' are steps that needed the
+warm-started ADMM escape; curtailment is renewable generation that could not be absorbed.
+
+\begin{table}[H]\centering
+\begin{tabular}{lrrrrr}
+\toprule
+Day & $\lambda_{\mathrm{RT}}$ [\$/MWh] & map $=$ cent [kW] & ADMM fallbacks & H$_2$ met & curtail [kWh]\\
+\midrule
+04-01 & $10$--$73$   & $7.5\!\times\!10^{-4}$ & 0 & 167\% & 688\\
+04-02 & $17$--$282$  & $2.0$                  & 0 & 122\% & 295\\
+04-03 & $11$--$31$   & $8.8\!\times\!10^{-6}$ & 0 & 133\% & 245\\
+04-04 & $9$--$60$    & $3.6\!\times\!10^{-3}$ & 0 & 136\% & 208\\
+04-05 & $11$--$23$   & $5.9$                  & 0 & 163\% & 649\\
+04-06 & $-1$--$234$  & $5.6$                  & 0 & 131\% & 646\\
+04-07 & $0$--$3553$  & $3.3$                  & 4 & 126\% & 236\\
+\midrule
+\textbf{Week 1 (1--7 Apr)} & & \textbf{$\le5.9$} & \textbf{4/672} & \textbf{140\%} & \textbf{2967}\\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Week 1.} 4 fallbacks / 672 steps ($99.4\%$ iteration-free). Interior days match the
+centralized equilibrium to $\sim\!10^{-6}$--$10^{-3}$~kW; boundary days (ceiling-bound) sit within
+$\le5.9$~kW ($<\!1\%$ of $900$) of the social optimum --- the multi-equilibrium residual of
+\S\ref{sec:limit}. Weekly curtailment $2967/43380$~kWh $=6.8\%$ of available renewable.}
+\end{table}
+
+\begin{table}[H]\centering
+\begin{tabular}{lrrrrr}
+\toprule
+Day & $\lambda_{\mathrm{RT}}$ [\$/MWh] & map $=$ cent [kW] & ADMM fallbacks & H$_2$ met & curtail [kWh]\\
+\midrule
+07-07 & $22$--$95$   & $0.83$ & 0 & 132\% & 151\\
+07-08 & $21$--$151$  & $3.4$  & 0 & 131\% & 57\\
+07-09 & $17$--$98$   & $3.5$  & 0 & 149\% & 116\\
+07-10 & $11$--$79$   & $2.5$  & 2 & 156\% & 416\\
+07-11 & $12$--$1754$ & $1.5$  & 1 & 163\% & 693\\
+07-12 & $26$--$312$  & $2.7$  & 2 & 132\% & 326\\
+07-13 & $16$--$82$   & $1.8$  & 0 & 127\% & 254\\
+\midrule
+\textbf{Week 2 (7--13 Jul)} & & \textbf{$\le3.5$} & \textbf{5/672} & \textbf{141\%} & \textbf{2012}\\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Week 2 (summer, unseen).} 5 fallbacks / 672 ($99.3\%$ iteration-free), including a
+$\$1754$ scarcity spike (07-11). Weekly curtailment $2012/34540$~kWh $=5.8\%$.}
+\end{table}
+
+\begin{table}[H]\centering
+\begin{tabular}{lrr|rr}
+\toprule
+& \multicolumn{2}{c|}{\textbf{Week 1 (April)}} & \multicolumn{2}{c}{\textbf{Week 2 (July)}}\\
+Agent & H$_2$ / target [kg] & curtail / avail [kWh] & H$_2$ / target [kg] & curtail / avail [kWh]\\
+\midrule
+PEM\_Elec    & $619/462$ (134\%) & --- (grid)   & $637/462$ (138\%) & --- (grid)\\
+ALK          & $420/333$ (126\%) & --- (grid)   & $416/333$ (125\%) & --- (grid)\\
+PEM\_PV      & $445/291$ (153\%) & $372/3521$   & $469/291$ (161\%) & $504/6043$\\
+PEM\_PV\_2   & $243/176$ (138\%) & $376/3521$   & $266/176$ (151\%) & $511/6043$\\
+PEM\_Wind    & $712/495$ (144\%) & $991/18169$  & $698/495$ (141\%) & $391/11227$\\
+PEM\_Wind\_2 & $552/385$ (143\%) & $1228/18169$ & $543/385$ (141\%) & $605/11227$\\
+\bottomrule
+\end{tabular}
+\caption{Per-agent weekly H$_2$ and curtailment --- now one row per agent, since all six differ.
+Every agent meets its contract (the receding $D_i(t)$ pacing keeps all on or above target);
+over-production ($>\!100\%$) reflects the day-ahead buying cheap power at the ceiling when
+$\lambda<a_i$. Note the inverter-limited agents: PEM\_PV\_2 curtails slightly \emph{more} than
+PEM\_PV ($375$ vs $371$~kWh in April) despite owning the same $125$~kW farm, because its $100$~kW
+stack physically cannot absorb the array's peak --- $25$~kW is thrown away regardless of price.
+The same holds for PEM\_Wind\_2 vs PEM\_Wind.}
+\end{table}
+
+\subsection{Critical-region and combination usage over the 2-week run}
+The number of \emph{combinations} (one CR per agent) is
+$K^N=507\cdot507\cdot5613\cdot12782\cdot5613\cdot10326\approx1.1\times10^{21}$ --- impossible to
+enumerate; FACET never does. Over the $1344$ real-time steps of both weeks, FACET selected only
+\textbf{700 distinct combinations} --- a fraction $6.5\times10^{-19}$ of the possible set --- and
+operation concentrates on a handful: the single most-used combination is selected on $123$ of $1344$
+steps. This empirical concentration ($\sim\!47$--$88$ distinct combinations per day out of
+$10^{21}$) is exactly what FACET's point-location and neighbour-graph walk exploit, and why the
+$35{,}348$-CR maps of Table~\ref{tab:cr} never need enumerating.
+
+\begin{table}[H]\centering
+\begin{tabular}{lccc}
+\toprule
+& Week 1 (April) & Week 2 (July) & Both weeks\\
+\midrule
+Distinct combinations per day & 47--68 & 53--88 & ---\\
+Distinct combinations over the week & 338 & 429 & ---\\
+\textbf{Distinct combinations used (union)} & & & \textbf{700}\\
+Of $K^N\approx1.1\times10^{21}$ possible & & & $6.5\times10^{-19}$\\
+Real-time steps & 672 & 672 & 1344\\
+Most-used combination (visits) & & & 123 / 1344\\
+\bottomrule
+\end{tabular}
+\caption{Combination usage. Of $\sim\!10^{21}$ possible combinations, real operation lives on
+\textbf{700} recurring ones over two weeks --- the maps (Table~\ref{tab:cr}) are built once and the
+FACET walk visits only this tiny recurring set.}
+\end{table}
+
+\paragraph{Communication / data transfer.} Every map step exchanges exactly \textbf{one decision
+broadcast per agent} (the FACET location, walk and refinement are local). Only the rare ADMM-fallback
+steps carry iterative rounds. Over each week the map steps contribute $1$ round/step; the $4$
+(April) / $5$ (July) fallback steps contribute the remaining rounds. An iterative GNE seeker
+run on \emph{every} step would instead need $\sim\!10^2$--$10^3$ agent broadcasts per step.
+Table~\ref{tab:timing} quantifies the same asymmetry in time: a map step clears in a median
+$125$~ms, a fallback step takes $\sim\!5.7$~s.
+
+\subsection{Solve times}\label{sec:timing}
+Timings are wall-clock on a single 12-core workstation, measured over both weeks: $14$ day-ahead
+solves (one per day) and $1344$ real-time steps ($96$ per day $\times$ $14$ days). The RTM figure is
+the cost of \emph{clearing the GNE at one 15-minute step} --- point location, self-consistency,
+the v-GNE solve, and (rarely) the ADMM fallback. The offline mpQP maps are excluded: they are
+built once (Table~\ref{tab:cr}) and never rebuilt. This table breaks down \emph{FACET's own} cost;
+the RTM row already \textbf{includes} the ADMM-fallback wall time on the $9$ steps that fall back
+(the ``all steps'' row). For the head-to-head against ADMM \emph{run on every step} --- FACET's full
+per-step timer, fallback included, beside a tuned ADMM's --- see Table~\ref{tab:bench-warm} in
+\S\ref{sec:exp2}: FACET clears a step in a median $3.7$~ms (mean $43.9$~ms with the fallback counted)
+against ADMM's median $131$~ms, at $1$ inter-agent round versus $67$.
+
+\begin{table}[H]\centering
+\begin{tabular}{lrrrrr}
+\toprule
+Stage & $n$ & mean & median & p95 & max\\
+\midrule
+DAM (distributed ADMM, 1/day) & 14 & $14.71$~s & $15.04$~s & $16.09$~s & $16.91$~s\\
+\quad ADMM iterations         & 14 & $3533$ & $3508$ & $3757$ & $3819$\\
+\midrule
+RTM FACET, map-resolved       & 1335 & $25.7$~ms & $\mathbf{3.9}$~ms & $11.9$~ms & $5407.7$~ms\\
+RTM ADMM fallback             & 9 & $4470.4$~ms & $4607.7$~ms & $7011.9$~ms & $7842.4$~ms\\
+RTM all steps                 & 1344 & $55.4$~ms & $\mathbf{3.9}$~ms & $12.5$~ms & $7842.4$~ms\\
+\bottomrule
+\end{tabular}
+\caption{Solve times over both weeks. The DAM runs \textbf{once per day}, off-line with respect to
+real-time operation, so its ADMM iterations cost nothing operationally --- it has a full day of
+slack. The RTM must clear inside each \textbf{15-minute (900~s)} dispatch interval; a map-resolved
+step finishes in a \textbf{median $3.9$~ms}, a headroom factor of $\sim\!2.3\times10^{5}$. The
+map-resolved step accepts the located self-consistent GNE directly: a neighbour-based
+min-potential refinement was measured to change the dispatch by $\le0.05$~kW while costing
+$\sim\!177$~ms on every ceiling-bound step, so it is omitted (\S\ref{sec:facet}). The mean is
+dragged above the median only by the $9$ rare fallback steps, whose wall time is dominated not by
+their ADMM solve ($\sim\!50$~ms, $27$~rounds) but by the Tier-1b neighbour search that precedes it;
+even so a fallback clears in $\sim\!5$~s, $\sim\!180\times$ inside the dispatch interval.}
+\label{tab:timing}
+\end{table}
+
+\begin{keybox}{Reading the timing table}
+The DAM and RTM numbers are \emph{not} comparable and should not be read as a speed-up. The DAM
+solves a $24$-hour, $6$-agent problem once per day with a full day of slack; the RTM solves a
+$4$-step problem every $15$ minutes against a hard deadline. What matters is that each stage sits
+far inside its own budget, and that within the RTM the explicit map is orders of magnitude cheaper
+than the iterative fallback it replaces.
+\end{keybox}
+
+\begin{warnbox}{A complete neighbour graph is more reliable, and costs more per step}
+An earlier build of this table showed a $9.0$~ms RTM median; this one shows $124.7$~ms, a
+$\sim\!14\times$ increase, alongside the fallback-rate improvement above. Both numbers are honest,
+measured on the same pipeline --- the difference is entirely the neighbour-graph fix. The 1-hop
+min-potential refinement in \S\ref{sec:facet} evaluates every 1-hop neighbour combination of the
+located solution and keeps the lowest-potential feasible one; with the old, badly incomplete graph
+most CRs had zero recorded neighbours, so this refinement was nearly free ($\approx\!1$ combination
+checked). With the complete graph (mean $5.9$--$8.9$ neighbours/CR) it now genuinely explores up to
+$3^N=729$ combinations per step. This is a real, deliberate cost, not a bug: it was measured, and
+retained because it sits $\sim\!4700\times$ inside the dispatch budget while measurably improving
+both the fallback rate and the multi-equilibrium residual (worst case $20.4\to5.9$~kW).
+\end{warnbox}
+
+\subsection{Figures}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{../results/figures/report/fig1_weekly_aggregate.pdf}
+\caption{Coalition aggregate grid import $\Sigma_i p_i$ (bottom) against the RT price (top, symlog)
+over each week, from the FACET clearing. The aggregate stays within $[L_{\min},L_{\max}]=[100,900]$
+(dashed) at all times; it rides the ceiling on cheap hours (buy H$_2$) and retreats when the RT price
+exceeds the H$_2$ break-even.}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{../results/figures/report/fig2_h2_per_agent.pdf}
+\caption{Weekly H$_2$ per agent, produced vs.\ the contract floor (target). Every agent clears its
+floor; over-production reflects buying cheap power at the ceiling. Labels show \% of target.}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{../results/figures/report/fig3_curtailment.pdf}
+\caption{Left: daily fleet renewable curtailment (kWh) for both weeks. Right: per-agent curtailment
+as a fraction of available renewable --- $\le\!8\%$: the coalition lets renewable-rich agents absorb
+their own output rather than being forced to curtail.}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{../results/figures/report/fig4_mechanism.pdf}
+\caption{Per-agent power balance on 2025-04-06 (coalition) --- a day the RT price swings from
+$-\$1$ to $\$234$/MWh, so the coalition both rides the ceiling (cheap/negative hours) \emph{and}
+\textbf{retreats to $L_{\min}=100$~kW when expensive}: the renewable agents opt out of the market
+(grid import $\to0$, running on their own generation, gold) while the grid agents cover the floor
+(top-right aggregate touches $100$). The converter load (black) $=$ renewable used (gold) $+$ grid
+import (grey); curtailed renewable is the red hatch above the load. Bottom-right: FACET accuracy
+(map $=$ centralized, log, bars) and ADMM fallbacks (red) per day across both weeks --- interior days
+$\sim\!10^{-6}$~kW, ceiling-bound days a few kW, fallbacks $\le\!4/96$.}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{../results/figures/report/fig5_prices.pdf}
+\caption{Actual vs.\ forecasted prices for the DAM (top left) and RTM (top right) on a representative
+day (2025-04-06), and the DAM prices for the entire week (bottom). The DAM forecast is evaluated
+once, a day ahead; the RTM nowcast is re-evaluated at every 15-minute receding step with fresh noise
+--- illustrating the forecast-vs-realized split the RTM must correct for online.}
+\end{figure}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Limitations (honest)}\label{sec:limit}
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{warnbox}{Scope and residuals}
+\begin{itemize}[nosep]
+\item \textbf{Multi-equilibrium residual at the ceiling.} With the full $[100,900]$ band the
+day-ahead schedule buys cheap power up to the $900$~kW ceiling, so real-time dispatch frequently
+binds the coupling, where the GNE is \emph{non-unique} (Hall \& Bemporad 2025, \S II-C: rank-deficient
+$M_x$, overlapping CRs). Tier~1c (\S\ref{sec:facet}) resolves most of this, but not all: on
+ceiling-bound steps the online solution can still sit a \emph{few kW} ($<\!1\%$ of $900$; worst
+observed $5.9$~kW on 04-05) from the social optimum, and $\sim\!0.7\%$ of steps still use
+the warm-started ADMM fallback. Those residual steps are ones where the v-GNE lies on \emph{no}
+located combination's manifold, so no selection rule on that manifold can reach it. \emph{Remaining
+option:} the paper's common-multiplier (homogeneous-multiplier) v-GNE selection (their eqs.~16--17)
+applied across candidate combinations; this needs each CR's dual law $\lambda(\theta)=C\theta+d$ and
+active set, which PPOPT computes but \texttt{cr\_store.AgentCR} currently discards --- storing them
+requires re-running the $26$-min offline solve.
+\item \textbf{Fleet heterogeneity is not the lever --- measured.} It is tempting to argue that the
+earlier identical PV/wind pairs \emph{caused} the non-uniqueness and that distinct agents would cure
+it. We tested this directly. Holding the clearing fixed (same band, same
+$\sum_iP_{\max,i}=1200$~kW), replacing the two identical pairs with six distinct agents made the
+iteration-free rate \emph{worse}: $99.2\%$ ($11/1344$) $\to$ $97.2\%$ ($37/1344$). Permutation
+symmetry between clones is a \emph{secondary} tie; the dominant one is the shared coupling
+constraint being active for $\ge2$ agents, which is independent of the fleet. Three control
+experiments support this:
+\begin{itemize}[nosep]
+\item \emph{Tuning} the hash-based neighbour graph did not help: enlarging it $6\times$
+(\texttt{max\_bucket\_size} $4\to16$, $30$k$\to$$185$k pairs) changed the fallback count by at most
+one step per day and left \texttt{map=cent} bit-identical. But this graph was itself badly
+incomplete (see the \texttt{facet\_crossing} keybox after Table~\ref{tab:cr}) --- only $\sim\!12\%$
+of true neighbours recovered, regardless of the tuning knob. \emph{Replacing} it with a correct,
+complete graph did help: fallbacks fell further, $16/1344\to9/1344$ ($98.8\%\to99.3\%$). The lesson
+is not ``the walk doesn't matter'' but ``tuning a fundamentally incomplete graph doesn't matter ---
+completeness does.''
+\item Steps where an inverter-limited agent force-curtails fall back at $15.6\%$ versus $2.44\%$
+elsewhere ($6.4\times$) on the (then-incomplete) graph, but there are only $32$ such steps,
+accounting for a small fraction of the fallbacks measured at that point --- a real but minor effect
+on its own.
+\item Diagnosing the fallback steps directly (07-10, incomplete graph): at the combination located
+\emph{from} the true v-GNE, the equilibrium solve returned a point $0.5$--$1.7$~kW away and
+infeasible by the same amount. The combination was right; the \emph{selection} was wrong.
+Constraining it (Tier~1c) recovers the v-GNE to $\sim\!10^{-3}$~kW at a $\sim\!10^{-13}$ feasibility
+residual and, on the incomplete graph, lifted the distinct fleet to $98.8\%$ ($16/1344$). With the
+subsequently-corrected graph the two fixes together reach $99.3\%$ ($9/1344$).
+\end{itemize}
+\textbf{The residual that remains is a property of the shared constraint, not of the agents} ---
+equilibrium selection (Tier~1c) and neighbour-graph completeness (\texttt{facet\_crossing}) are the
+two levers that actually move it; fleet composition is not.
+\item \textbf{H$_2$ over-production.} The daily H$_2$ target is a \emph{floor}; with cheap ERCOT power
+and \$3/kg H$_2$, buying to the ceiling is profitable, so the fleet over-produces to $\sim\!140\%$.
+Economically rational, but a conscious design point.
+\item \textbf{Validation oracle.} The centralized QP is used only offline to certify accuracy; agents
+never share models, so it cannot run in deployment.
+\item \textbf{Model scope.} No batteries, no 65-min binary participation gate, no export --- kept out
+to remain a convex (mp)QP at both stages. The semi-continuous $\{0\}\cup[L_{\min},L_{\max}]$
+market-exit rule (non-convex) is out of scope for the explicit-map method.
+\end{itemize}
+\end{warnbox}
+
+\section{Relation to the explicit-GNE literature, and the ADMM comparison}\label{sec:related}
+% ─────────────────────────────────────────────────────────────────────────────
+This section positions the method against the two closest lines of work, states honestly what we
+inherit from our own prior papers, and reports the head-to-head comparison against ADMM
+(\S\ref{sec:exp2}, measured over both weeks). The centralized-mpQP baseline (\S\ref{sec:exp1})
+remains a proposed experiment and is flagged as such where it appears.
+
+\subsection{Three architectures for explicit game solving}
+All three lines below build offline multiparametric maps and evaluate them online. They differ in
+\emph{what the map is a function of}, and that single choice determines everything else.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{p{3.1cm}p{3.3cm}p{2.9cm}p{2.6cm}p{2.2cm}}
+\toprule
+& parameter of the map & offline cost & online cost & central entity?\\
+\midrule
+\textbf{Benenati \& Belgioioso}\newline (KTH, arXiv:2512.07749) &
+$x^0$ only $\Rightarrow$ \textbf{one joint map} returning all agents' inputs &
+active-set tree exploration (their Alg.~1) &
+1 lookup + 1 affine evaluation; \textbf{no circularity} &
+yes, to build the map\\
+\addlinespace
+\textbf{Hall \& Bemporad}\newline (ETH/IMT, arXiv:2512.05505) &
+$(x_{-i},p)$ per agent &
+enumerate $\prod_{i=1}^N N_i$ combinations &
+lookup $+$ solve $M_xx=M_pp+M_1$ &
+yes, stated explicitly\\
+\addlinespace
+\textbf{This work}\newline (IF-mpDiMPC lineage) &
+$\bigl(\sum_{j\ne i}p_j,\ \theta\bigr)$ per agent &
+$6$ private mpQPs; \textbf{no enumeration} &
+locate $+$ fixed point (\S\ref{sec:walkthrough}) &
+\textbf{never}\\
+\bottomrule
+\end{tabular}
+\caption{The three architectures. The parameter of the map is the design decision; the rest follows.}
+\label{tab:arch}
+\end{table}
+
+\begin{keybox}{Honest lineage: what this work inherits}
+This method is \textbf{IF-mpDiMPC's architecture carried into a game}, not a new primitive. From
+Saini, Brahmbhatt, Avraamidou \& Ganesh (\emph{Comput.\ Chem.\ Eng.}\ 200, 2025, 109169) and the
+ACC-2026 FACET-DiMPC paper we take: the per-agent offline maps; the block linear system
+($L\,U=R\,x(k)+d$ there, $M_xx=M_p\theta+M_1$ here --- structurally identical, $I$ on the diagonal and
+$-A_{ij}$ off it); the membership validation of the solved point; and the one-exchange-per-step goal.
+Crucially, \textbf{IF-mpDiMPC-V2 already performs point location} (its Algorithm 4 forms
+$\theta_i=[x(k),U_1(k-1),\dots,U_M(k-1)]$ and states ``Perform Point Location algorithm''). Point
+location is \emph{not} a contribution of this work.
+
+What is genuinely new here is what the \emph{game} forces, none of which arises in cooperative DiMPC:
+\begin{enumerate}[leftmargin=1.6em,nosep]
+\item \textbf{Singular systems are the answer, not an error.} IF-mpDiMPC discards them
+(\texttt{if abs(det(L)) < 1e-10: return None}) --- correct there, because a shared objective gives a
+unique solution, so singularity means the combination is wrong. Here $M_x$ is genuinely rank-deficient
+at the coupling ceiling (rank $36$ of $40$ in Example~B) and the manifold contains the true answer;
+discarding it would fail at exactly the hard steps. Hence the variational selection and Tier~1c.
+\item \textbf{Refining the iterate instead of enumerating around it.} V2/FACET-DiMPC point-locate
+\emph{once} and compensate by enumerating the product $\prod_i(1+|\mathcal N_i|)$ over each agent's
+neighbours. Measured on this fleet that product is $985{,}608$ combinations at $t{=}0$; we solve a
+mean of $1.2$ per step by re-locating and refining the iterate instead.
+\item \textbf{Sum-compression of the coupling.} Saini's $\theta_i$ carries every other controller's
+full input trajectory (growing as $M\!\cdot\!N_p\!\cdot\!n_u$); ours carries four numbers, because the
+PCC band is the only coupling. This is both the scalability and the privacy argument.
+\end{enumerate}
+\end{keybox}
+
+\subsection{What the literature measures --- and where it stops}
+Both comparison points report limits in their own text; neither needs interpretation from us.
+
+\paragraph{Hall \& Bemporad: a central entity, and a product enumeration.}
+Their \S II states plainly: \emph{``We assume that all the functions and sets involved in (1) are known
+to a central entity, which is responsible for solving the multiparametric Nash equilibrium problem for
+all $p\in\mathcal P$.''} Their privacy claim is about runtime only. Their \S II-A then enumerates
+\emph{all} combinations $\mathcal C_k$, $k\in\{1,\dots,\prod_{i=1}^N N_i\}$, pruning invalid
+(Definition~2) and empty ones. For this fleet $\prod_iN_i\approx1.1\times10^{21}$
+(Table~\ref{tab:cr}), so the method as written cannot be run on this case study at all --- which is
+consistent with their case studies being a battery-charging game and a toy two-mass spring system.
+We nonetheless \emph{use} their results: the notation $M_xx=M_p\theta+M_1$ is their Eq.~(6), and our
+manifold $x=x_p+V_2y_2$ is their Eq.~(9a).
+
+\paragraph{Benenati \& Belgioioso: the offline wall, measured.}
+Their map's parameter is $x^0$ alone, so online there is \emph{no circularity} --- one lookup, no
+fixed point, no iteration --- and because they solve an affine variational inequality (whose solution
+\emph{is} the variational equilibrium, unique under their Assumption~1 $H\succ0$), the rank-deficient
+manifold never arises. Their Table~I reports how far that scales:
+
+\begin{table}[H]\centering\small
+\begin{tabular}{ccccc}
+\toprule
+$T\ \backslash\ n_x$ & $2$ & $4$ & $6$ & $8$\\
+\midrule
+$4$  & $100\%$ & $100\%$ & $100\%$   & $100\%$\\
+$7$  & $100\%$ & $100\%$ & $100\%$   & $66.7\%$\\
+$10$ & $100\%$ & $100\%$ & $87.5\%$  & $\mathbf{0\%}$\\
+\bottomrule
+\end{tabular}
+\caption{Reproduced from Benenati \& Belgioioso, Table~I: percentage of games whose solution mapping
+was fully computed within a \textbf{30-minute} offline limit. At $n_x{=}8$, $T{=}10$ the limit was
+exceeded on \emph{every} instance; the algorithm then returns ``a partially built mapping
+$\mathcal S$ that does not cover the entire state space''. Their stated conclusion: ``The main
+limitation of the proposed approach is the offline computational effort required to construct the
+explicit solution mapping.''}
+\label{tab:benenati}
+\end{table}
+
+Two consequences matter for us. First, $n_x$ is the \emph{parameter dimension of the map} --- the role
+$\theta$ plays here, and \textbf{ours is $24$}, three times the dimension at which their algorithm
+already fails on every instance. Second, their online evaluation time grows from $10^{-4}$~s at
+$n_x{=}2$ to $0.1$~s at $n_x{=}8$, which they attribute directly to critical-region count; $0.1$~s is
+already our median map step (Table~\ref{tab:timing}) at one third of our parameter dimension. Note
+also that a partially-built map \emph{requires} a fallback for the uncovered region --- so even their
+method is not iteration-free at $n_x{=}8$, $T{=}10$.
+
+\subsection{Proposed experiment 1: build the joint map as one centralized mpQP}\label{sec:exp1}
+\begin{keybox}{The idea in one line}
+Because this game is an \emph{exact potential game with a strictly convex potential}, the variational
+GNE is simply the minimizer of the potential over the joint feasible set --- so the joint map
+$\theta\mapsto x^\star(\theta)$ is a \textbf{plain mpQP}, not an mpAVI, and can be handed straight to
+PPOPT.
+\end{keybox}
+The centralized oracle used throughout this report (\texttt{rhg\_online.centralized}) already solves
+\[
+  \min_x\ \tfrac12x^\top Qx+(c+F\theta)^\top x
+  \qquad\text{s.t.}\qquad Gx\le w_0+W\theta ,
+\]
+which is parametric in $\theta$ by construction. Making it \emph{explicit} would yield exactly the
+Benenati--Belgioioso architecture (row 1 of Table~\ref{tab:arch}) for our problem. The instance is
+already assembled in code:
+\begin{center}\small
+\begin{tabular}{ll}
+\toprule
+decision variables $n_x$ & $\mathbf{40}$\\
+parameters $n_\theta$ & $\mathbf{24}$\\
+inequality constraints & $\mathbf{142}$ \quad ($G\in\mathbb R^{142\times40}$, $W\in\mathbb R^{142\times24}$)\\
+$Q$ & $40\times40$, \textbf{positive definite}, $\lambda_{\min}=1.0\times10^{-3}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+$Q\succ0$ matters: the potential is strictly convex, so the minimizer --- and therefore the v-GNE ---
+is \textbf{unique}, the map is single-valued, and this is a well-posed standard mpQP. (It also
+explains why the min-potential selection of \S\ref{sec:walkthrough} is the correct one: for a
+potential game the pseudo-gradient is $\nabla\Phi$, so the variational solution is the social
+optimum.)
+
+\paragraph{Protocol.} Hand $(Q,\,c,\,F,\,G,\,w_0,\,W)$ and the $\theta$-box to PPOPT
+(\texttt{combinatorial\_parallel}) under a hard wall-clock budget, mirroring Benenati \&
+Belgioioso's 30-minute cap. Record: whether the map completes, the resulting CR count, the build
+time, and the online lookup time.
+
+\paragraph{Both outcomes are informative.}
+\begin{itemize}[leftmargin=1.4em,nosep]
+\item \textbf{If it completes} --- we gain an explicit-centralized baseline that is $100\%$
+iteration-free \emph{by construction} (no circularity, hence no fixed point; and no manifold, since
+$Q\succ0$ gives a unique minimizer). We would then report honestly what it costs computationally
+\emph{and} conceptually: it requires a central entity that knows all six cost models, which is
+precisely the assumption \S\ref{sec:facet}'s privacy model forbids. It is the natural baseline a
+referee will ask for, and we should have it either way.
+\item \textbf{If it does not complete} --- which Table~\ref{tab:benenati} makes the likelier outcome
+at $n_\theta=24$ --- we gain a \emph{measured} justification for the per-agent decomposition, rather
+than an argued one. That is a considerably stronger \S\ref{sec:limit} than any appeal to intuition,
+and it independently corroborates Benenati \& Belgioioso at a third party's problem scale.
+\end{itemize}
+The cost of finding out is low: every matrix is already built, and the budget caps the downside.
+
+\subsection{Head-to-head against ADMM (measured)}\label{sec:exp2}
+An earlier draft of this report quoted a ``$\sim\!35\times$ faster than ADMM'' figure measured on a
+\textbf{biased sample} --- ADMM timed only on the $0.7\%$ of steps where FACET fell back, i.e.\ the
+degenerate ceiling steps where ADMM is slowest. That figure is replaced here by a measurement
+following Benenati \& Belgioioso's protocol: run ADMM on \textbf{every} step over both weeks, on the
+\emph{identical} $\theta$ sequence FACET faced, with \textbf{every method initialised identically}
+within a block (warm = the previous step's solution; cold = from nothing), judged by the \emph{same}
+metric --- distance to a high-accuracy oracle, $\lVert x-x_{\mathrm{ref}}\rVert_\infty<10^{-4}$~kW
+(the pipeline's own \texttt{STRICT\_TOL}). ADMM is tuned at $\rho=0.01$, swept on the binding steps
+(a sweep over all steps is invalid: the coupling binds on only $\sim\!20\%$ of steps and the slack
+majority decouples the game, so any $\rho$ converges there). The instrumentation time is excluded
+from every solver's clock. Only ADMM is compared: it is the sole iterative baseline that shares
+FACET's privacy model (per-agent updates, only the aggregate exchanged). Douglas--Rachford was
+implemented and run, then dropped --- its projection is onto the coalition's \emph{joint} feasible
+set, so it requires a central party and is not a distributed method.
+
+\input{../results/bench_warm_table}
+
+\begin{keybox}{What the comparison shows --- communication first, then speed}
+\textbf{Communication is the robust, implementation-independent claim.} FACET clears a step with a
+\textbf{median of $1$ inter-agent round} (mean $1.2$, max $35$ on a fallback step); ADMM needs a
+\textbf{median of $67$} (mean $73.8$). Over both weeks FACET spends $1591$ rounds against the
+$\sim\!90{,}000$ an always-iterating solver would ($1.8\%$) --- and this number depends on neither
+the hardware, the language, nor the network. It is the direct meaning of ``iteration-free''.
+
+\textbf{Speed is secondary but now favourable.} At a median $3.1$~ms against ADMM's $104$~ms, FACET
+is $\sim\!34\times$ faster per step, and --- unlike the old biased figure --- it wins on the binding
+steps too ($2.7$ vs $104$~ms). Three caveats keep this honest: (i) ADMM's time is
+\emph{oracle-assisted} (we stop it the moment it crosses $10^{-4}$ of the reference, which a deployed
+ADMM cannot detect), so the real ADMM is slower --- this \emph{favours} ADMM; (ii) the timings are
+serial, single-machine compute and ignore network latency, under which FACET's $1$ round vs ADMM's
+$67$ would widen the gap by orders of magnitude --- this \emph{understates} FACET; (iii) FACET's
+\emph{worst case} is worse than ADMM's ($3.9$~s on a rare fallback vs ADMM's $0.29$~s), because of
+the Tier-1b neighbour search. Because of (i)--(iii) the wall-clock ratio is not the claim to hang the
+paper on; the communication count is.
+
+\textbf{Accuracy is where FACET pays.} FACET reaches $10^{-4}$~kW on $1078/1344$ steps; ADMM on
+$1277/1344$. FACET's misses are the $\sim\!20\%$ binding-ceiling steps where it returns a
+\emph{certified but non-variational} GNE (a valid equilibrium that is not the social optimum),
+bounded to $\sim\!19$~kW ($2\%$ of the $900$~kW band). See \S\ref{sec:limit}.
+\end{keybox}
+
+The cold-start block (Table~\ref{tab:bench-cold}, appendix data) tells the other half of the story:
+without a warm start FACET reaches tolerance on only $235/1344$ steps --- it is a receding-horizon
+method that exploits temporal coherence, not a general-purpose solver. Warm-started is the
+deployment-realistic regime and the one that matters; the cold block is reported only so the
+comparison cannot be accused of hiding it.
+
+\input{../results/bench_cold_table}
+
+\subsection{Summary for discussion}
+\begin{enumerate}[leftmargin=1.6em,nosep]
+\item Our contribution should be stated as \emph{IF-mpDiMPC carried into a game} --- variational
+selection on rank-deficient systems, fixed-point iteration in place of neighbourhood enumeration, and
+sum-compression of the coupling. Point location itself should be attributed to IF-mpDiMPC-V2.
+\item The joint-map architecture (Benenati \& Belgioioso) would make us $100\%$ iteration-free in
+principle, but their own Table~\ref{tab:benenati} shows it failing on every instance at $n_x{=}8$,
+and our $\theta$ is $24$-dimensional. Experiment~1 settles this empirically for our problem.
+\item Experiment~2 removes the one number in this report that a referee can fairly attack.
+\end{enumerate}
+
+\section{Reproduction}
+\texttt{simple\_game/rhg\_mpqp.py} (per-agent H=4 private-$\theta$ mpQP; holds the locked spec
+$L_{\min}/L_{\max}=100/900$, fleet); \texttt{rhg\_offline.py} (one-time PPOPT solve $\to$
+\texttt{out/rhg\_agent\_sols.pkl}); \texttt{dam.py} (distributed day-ahead ADMM $+$ centralized
+oracle); \texttt{rhg\_online.py::solve\_step} (FACET point-location + v-GNE solve + neighbour walk +
+warm-started ADMM fallback + data-transfer accounting); \texttt{rhg\_week.py} (distributed DAM $+$
+receding closed loop, curtailment tracking); \texttt{rhg\_figs.py} (figures). Data in
+\texttt{data/ercot/}; locked spec in \texttt{FORMULATION.md}; status/handoff in
+\texttt{STATUS\_dam\_rtm\_boundary.md}.
+\end{document}

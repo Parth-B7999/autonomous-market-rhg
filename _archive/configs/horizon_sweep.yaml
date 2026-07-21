@@ -1,0 +1,6 @@
+# Horizon sensitivity — fixed N=4, vary H
+
+base_config: configs/base.yaml
+
+sweep:
+  rtm_horizon: [3, 6, 12]
