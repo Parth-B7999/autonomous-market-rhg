@@ -29,7 +29,7 @@ def main(root: str) -> None:
     agents = [a for a in next(iter(data.values()))[0] if a != 'TOTAL']
 
     def f(x, nd=1):
-        return '—' if x is None else (f'{x:,.{nd}f}' if isinstance(x, float) else str(x))
+        return '—' if x is None or x == 0.0 else (f'{x:,.{nd}f}' if isinstance(x, float) else str(x))
 
     print('### Fleet (7 days, seed 42)\n')
     print('| run | net profit $ | energy cost $ | H2 kg | curtail kWh | in-mkt agent-h '
