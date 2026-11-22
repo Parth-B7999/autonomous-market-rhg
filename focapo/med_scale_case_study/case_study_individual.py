@@ -25,7 +25,8 @@ PROJ    = Path(__file__).parent
 RESULTS = PROJ / "results"
 RESULTS.mkdir(exist_ok=True)
 
-_PARENT = str(PROJ.parent / 'admm_elz_market')
+from _shared_path import SHARED_DIR as _SHARED_DIR  # noqa: E402
+_PARENT = str(_SHARED_DIR)
 if _PARENT not in sys.path:
     sys.path.append(_PARENT)
 

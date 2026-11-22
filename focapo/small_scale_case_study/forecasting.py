@@ -19,12 +19,31 @@ Renewable  : real future hourly value + N(0, 20% of cap)
              (0 for agents with no renewable)
 """
 from __future__ import annotations
+import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
 
 _HERE    = Path(__file__).parent
-DATA_DIR = (_HERE.parent / "autonomous_market_rhg" / "data" / "raw").resolve()
+
+
+def _find_data_dir() -> Path:
+    """PJM CSV folder. Order: $FOCAPO_DATA_DIR, repo layout
+    (autonomous_market_rhg/data/raw, two levels up), old sibling layout."""
+    env = os.environ.get("FOCAPO_DATA_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    candidates = [
+        _HERE.parent.parent / "data" / "raw",                       # repo: focapo/small_scale_case_study
+        _HERE.parent / "autonomous_market_rhg" / "data" / "raw",    # old: sibling folders
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c.resolve()
+    return candidates[0].resolve()
+
+
+DATA_DIR = _find_data_dir()
 
 STEPS_PER_DAY  = 288
 STEPS_PER_HOUR = 12

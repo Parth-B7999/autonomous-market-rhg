@@ -51,7 +51,8 @@ for d in OUT_DIRS:
 # make local modules importable (agents_med, agents)
 if str(PROJ) not in sys.path:
     sys.path.insert(0, str(PROJ))
-_PARENT = str(PROJ.parent / "admm_elz_market")
+from _shared_path import SHARED_DIR as _SHARED_DIR  # noqa: E402
+_PARENT = str(_SHARED_DIR)
 if _PARENT not in sys.path:
     sys.path.append(_PARENT)
 

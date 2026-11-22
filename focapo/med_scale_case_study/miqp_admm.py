@@ -55,7 +55,8 @@ from pathlib import Path
 # miqp_admm.py / simulation_sc.py — inserting the parent at 0 would shadow the
 # med-local modules and silently run the parent's code).
 _HERE   = str(Path(__file__).resolve().parent)
-_PARENT = str(Path(__file__).resolve().parent.parent / 'admm_elz_market')
+from _shared_path import SHARED_DIR as _SHARED_DIR  # noqa: E402
+_PARENT = str(_SHARED_DIR)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 if _PARENT not in sys.path:

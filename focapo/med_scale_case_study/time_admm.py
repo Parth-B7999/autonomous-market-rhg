@@ -36,13 +36,11 @@ from pathlib import Path
 import numpy as np
 
 # ── sys.path repair ───────────────────────────────────────────────────────────
-# agents_med.py / simulation_sc.py / miqp_admm.py all append
-# `../admm_elz_market`, which no longer exists — that folder is now
-# `../small_scale_case_study`.  Append (never insert at 0) the real location so
+# Shared modules live in ../small_scale_case_study (see _shared_path.py).  Append (never insert at 0) the real location so
 # the shared modules (agents, forecasting) resolve while the med-local
 # simulation_sc.py / miqp_admm.py keep priority.
 _HERE   = Path(__file__).resolve().parent
-_SHARED = _HERE.parent / 'small_scale_case_study'
+from _shared_path import SHARED_DIR as _SHARED  # noqa: E402
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 if _SHARED.is_dir() and str(_SHARED) not in sys.path:

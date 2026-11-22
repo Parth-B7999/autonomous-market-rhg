@@ -1,7 +1,7 @@
 """
 agents_med.py — Medium-scale (125–250 kW) electrolyzer fleet definitions.
 
-5× electrolyzer/renewable scaling from the original admm_elz_market fleet.
+5× electrolyzer/renewable scaling from the original admm_elz_market (now small_scale_case_study) fleet.
 Battery sizing uses industry-standard C-rates and durations (reviewed, not
 blind 5× scaling).
 
@@ -22,7 +22,8 @@ from pathlib import Path
 # miqp_admm.py, and inserting the parent at position 0 would silently shadow the
 # med-local versions (the case study would run the parent's code instead).
 _HERE   = str(Path(__file__).resolve().parent)
-_PARENT = str(Path(__file__).resolve().parent.parent / 'admm_elz_market')
+from _shared_path import SHARED_DIR as _SHARED_DIR  # noqa: E402
+_PARENT = str(_SHARED_DIR)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 if _PARENT not in sys.path:
