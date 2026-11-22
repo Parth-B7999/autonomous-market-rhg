@@ -1,0 +1,20 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+%post
+    # versions match the laptop env used for Phase A/B runs
+    pip install --no-cache-dir \
+        numpy==1.26.4 \
+        pandas==2.3.2 \
+        scipy==1.17.1 \
+        matplotlib==3.10.8 \
+        gurobipy==13.0.1
+    # gurobipy from pip ships a size-limited license (2000 vars / 2000 constrs);
+    # the largest model here is ~420 vars / ~610 constrs (tools/model_sizes.py).
+    # Never bake a gurobi.lic into this image.
+
+%test
+    python -c "import numpy, pandas, scipy, matplotlib, gurobipy; print('gurobi', gurobipy.gurobi.version())"
+
+%labels
+    Purpose FOCAPO-CPC 2027 talk experiments (HTCondor jobs)

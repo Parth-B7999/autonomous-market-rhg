@@ -1,0 +1,13 @@
+# Interactive Apptainer build job (CHTC "Use Apptainer containers" guide).
+#   condor_submit -i build.sub
+#   apptainer build focapo.sif focapo.def
+#   apptainer exec -e focapo.sif python -c "import gurobipy; print(gurobipy.gurobi.version())"
+#   mv focapo.sif /staging/<first letter of NetID>/<NetID>/
+log = build.log
+transfer_input_files = focapo.def
+requirements = (HasCHTCStaging == true)
++IsBuildJob = true
+request_cpus = 1
+request_memory = 4GB
+request_disk = 6GB
+queue
