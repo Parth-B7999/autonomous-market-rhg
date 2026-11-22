@@ -1,0 +1,33 @@
+# FOCAPO-CPC 2027 code: track source only. Results live on the laptop, never in git.
+results/
+results_*/
+report/
+analysis/out/
+__pycache__/
+*.zip
+*.pptx
+*.pdf
+*.png
+*.npz
+*.pkl
+*.csv
+!**/params/*.txt
+
+# HTCondor logs / job outputs
+*.log
+*.out
+*.err
+condor_*/
+logs/
+
+# Licenses and secrets
+*.lic
+gurobi.lic
+*.key
+.env
+
+# Paper sources and personal notes kept locally
+FOCAPO_CPC_2027_Template*/
+Focapo Paper overleaf/
+CLAUDE_CODE_CHTC_PROMPT.md
+.DS_Store
