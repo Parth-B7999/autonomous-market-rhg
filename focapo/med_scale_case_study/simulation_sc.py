@@ -55,6 +55,7 @@ class SimOptions:
     rt_rule_b_per_step: bool = False  # B3: individual RTM, per-step increment binary
     exec_floor: bool = False          # B4: enforce aggregate L_min at execution (gne/central)
     commit_shadow: bool = True        # with commit_mode='admm', also log the central u
+    forecaster: str = 'noise'         # 'noise' (paper: truth + Gaussian noise) | 'xgb' (trained, honest)
 
 
 # ── Result container (same shape as original simulation.py SimResults) ─────────
@@ -235,6 +236,13 @@ def _run(
 
     print(f"Loading PJM data from {start_date} ({n_days} days)…")
     week = load_pjm_week(start_date, n_days)
+    fcp = None
+    if opts.forecaster == 'xgb':
+        _focapo = str(Path(__file__).resolve().parents[1])
+        if _focapo not in sys.path:
+            sys.path.insert(0, _focapo)
+        from forecaster.provider import XGBForecaster
+        fcp = XGBForecaster(start_date, n_days)
     arr  = _alloc(n_days, T, N)
 
     h2_base   = [0.75 * ag.p_elec_max_kw * ag.eta_kg_per_kwh * 24 for ag in agents]
@@ -256,7 +264,7 @@ def _run(
         arr['h2_target'][d] = [ag.h2_target_kg_day for ag in agents]
 
         # ── DAM MIQP (once per day) ───────────────────────────────────────────
-        dam_fc      = dam_forecast(week, d, agents, rng)
+        dam_fc      = fcp.dam(d, agents) if fcp else dam_forecast(week, d, agents, rng)
         bat_soc_dam = np.array([ag.bat_soc_kwh for ag in agents])
 
         if scenario == 'gne':
@@ -322,8 +330,10 @@ def _run(
             t_start = 12 * h
 
             for i, ag in enumerate(agents):
-                fc = rt_forecast(12 * h, week, d, H_RT,
-                                 ag.renewable_type, ag.renewable_cap_kw, crng)
+                fc = (fcp.rt(d, 12 * h, current_t, H_RT,
+                             ag.renewable_type, ag.renewable_cap_kw) if fcp else
+                      rt_forecast(12 * h, week, d, H_RT,
+                                  ag.renewable_type, ag.renewable_cap_kw, crng))
                 g_c[i] = fc['ren']
                 if i == 0:
                     lam_c = fc['lam']
@@ -396,8 +406,10 @@ def _run(
             g_fc  = np.zeros((N, H_RT))
             lam_t = np.zeros(H_RT)
             for i, ag in enumerate(agents):
-                fc = rt_forecast(t, week, d, H_RT,
-                                 ag.renewable_type, ag.renewable_cap_kw, rng)
+                fc = (fcp.rt(d, t, t, H_RT, ag.renewable_type, ag.renewable_cap_kw)
+                      if fcp else
+                      rt_forecast(t, week, d, H_RT,
+                                  ag.renewable_type, ag.renewable_cap_kw, rng))
                 g_fc[i] = fc['ren']
                 if i == 0:
                     lam_t = fc['lam']

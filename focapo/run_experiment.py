@@ -49,6 +49,7 @@ def sim_options(args) -> 'simulation_sc.SimOptions':
         dam_u_per_step='b2' in fixes,
         rt_rule_b_per_step='b3' in fixes,
         exec_floor='b4' in fixes,
+        forecaster=args.forecaster,
     )
 
 
@@ -60,6 +61,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument('--seed', type=int, default=P.SEED)
     ap.add_argument('--noise-scale', type=float, default=1.0,
                     help='multiplies all forecast noise std devs (0 = perfect forecast)')
+    ap.add_argument('--forecaster', choices=['noise', 'xgb'], default='noise',
+                    help="noise = truth + Gaussian noise (paper); xgb = trained XGBoost "
+                         "forecaster using only data before the week (forecaster/)")
     ap.add_argument('--commit-mode', choices=['central', 'admm'], default='central',
                     help='GNE hourly commitment: centralized MIQP (paper) or ADMM')
     ap.add_argument('--baseline', choices=['paper', 'fixed'], default='paper',
@@ -102,6 +106,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         tag = '' if args.agents == 'all' else '_S' + ''.join(map(str, args.agent_idx))
         fx = 'paper' if not args.fix_set else '-'.join(args.fix_set)
         cm = f'_commit-{args.commit_mode}' if args.scenario == 'gne' else ''
+        cm += '_xgb' if args.forecaster == 'xgb' else ''
         args.out = str(ROOT / 'results' /
                        f'{args.scenario}_{fx}{cm}_{args.start_date}_s{args.seed}{tag}')
     return args

@@ -31,3 +31,6 @@ FOCAPO_CPC_2027_Template*/
 Focapo Paper overleaf/
 CLAUDE_CODE_CHTC_PROMPT.md
 .DS_Store
+
+# Trained forecaster models (rebuild with forecaster/train.py)
+forecaster/models/

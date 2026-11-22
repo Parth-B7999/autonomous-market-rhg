@@ -8,7 +8,9 @@ From: python:3.11-slim
         pandas==2.3.2 \
         scipy==1.17.1 \
         matplotlib==3.10.8 \
-        gurobipy==13.0.1
+        gurobipy==13.0.1 \
+        xgboost==3.0.4 \
+        scikit-learn==1.8.0
     # gurobipy from pip ships a size-limited license (2000 vars / 2000 constrs);
     # the largest model here is ~420 vars / ~610 constrs (tools/model_sizes.py).
     # Never bake a gurobi.lic into this image.
