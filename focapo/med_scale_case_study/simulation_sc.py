@@ -34,7 +34,8 @@ if _PARENT not in sys.path:
 from agents import ElzAgent, H_RT, H_DA, DT_RT, DT_DA, STEPS_PER_DAY    # noqa
 from forecasting import load_pjm_week, get_day, dam_forecast, rt_forecast  # noqa
 from miqp_admm import (solve_gne, solve_individual,                        # noqa
-                        commit_u_gne, commit_u_individual)
+                        commit_u_gne, commit_u_individual, commit_u_gne_admm)
+from central import solve_central                                          # noqa
 
 
 # Real-time H2 tracking safety margin.  The RTM controller tracks the DAM
@@ -44,6 +45,16 @@ from miqp_admm import (solve_gne, solve_individual,                        # noq
 # is uncertain).  1.0 = track exactly (sub-1% misses possible under wind error);
 # >1.0 = bank a cushion at the cost of a little over-production.
 H2_RTM_MARGIN = 1.02
+
+
+# ── Run options (talk fixes).  Defaults = paper behaviour. ─────────────────────
+@dataclass
+class SimOptions:
+    commit_mode: str = 'central'      # GNE hourly commitment: 'central' (paper) | 'admm' (B1)
+    dam_u_per_step: bool = False      # B2: individual DAM, one market binary per hour
+    rt_rule_b_per_step: bool = False  # B3: individual RTM, per-step increment binary
+    exec_floor: bool = False          # B4: enforce aggregate L_min at execution (gne/central)
+    commit_shadow: bool = True        # with commit_mode='admm', also log the central u
 
 
 # ── Result container (same shape as original simulation.py SimResults) ─────────
@@ -73,6 +84,7 @@ class SimResults:
     lmax_bind:np.ndarray   # (D, T)     bool  aggregate at L_max
     curtail:  np.ndarray   # (D, T, N)  curtailed renewable [kW]
     participation: np.ndarray = field(default=None)  # (D, 24, N) hourly u ∈{0,1}
+    extra: dict = field(default=None)  # option-specific logs (commit agreement, B4, central)
 
 
 def _alloc(n_days: int, T: int, N: int) -> dict:
@@ -101,6 +113,14 @@ def _alloc(n_days: int, T: int, N: int) -> dict:
         'lmax_b':   np.zeros((n_days, T), dtype=bool),
         'curtail':  np.zeros((n_days, T, N)),
         'u_sched':  np.zeros((n_days, 24, N), dtype=int),
+        # extra logs
+        'u_commit':        np.full((n_days, 24, N), -1, dtype=int),  # commitment result u_c
+        'u_commit_shadow': np.full((n_days, 24, N), -1, dtype=int),  # central u_c on same inputs
+        'commit_iters':    np.zeros((n_days, 24), dtype=int),
+        'commit_conv':     np.ones((n_days, 24), dtype=bool),
+        'floor_fix_kw':    np.zeros((n_days, T)),                    # B4 deficit added
+        'central_slack':   np.zeros((n_days, T)),                    # central agg slack used
+        'central_skipped': np.zeros((n_days, T), dtype=int),         # agents dropped (own block infeasible)
     }
 
 
@@ -165,6 +185,29 @@ def _execute_step(
     return p_exec, pch_exec, pdis_exec, curtail
 
 
+def _enforce_agg_floor(agents, p_exec, pch_exec, pdis_exec, curtail, g_true,
+                       cur_soc, u_now, l_min):
+    """B4: if any agent is in market and the executed aggregate is below L_min,
+    add the deficit to in-market agents in proportion to their electrolyzer
+    headroom (P_max − p_elec).  The extra import first fills that headroom;
+    any excess is absorbed by _execute_step (less battery discharge, more
+    charge, then renewable curtailment).  Returns the executed arrays and the
+    deficit added [kW] (0 if the floor was already met)."""
+    in_mkt = np.flatnonzero(u_now == 1)
+    agg = float(p_exec.sum())
+    if in_mkt.size == 0 or agg >= l_min - 1e-6:
+        return p_exec, pch_exec, pdis_exec, curtail, 0.0
+    deficit = l_min - agg
+    p_elec = p_exec + (g_true - curtail) + pdis_exec - pch_exec
+    head = np.array([max(0.0, agents[i].p_elec_max_kw - p_elec[i]) for i in in_mkt])
+    w = head / head.sum() if head.sum() > 1e-9 else np.full(in_mkt.size, 1.0 / in_mkt.size)
+    p_new = p_exec.copy()
+    p_new[in_mkt] += deficit * w
+    p2, pch2, pdis2, cur2 = _execute_step(agents, p_new, pch_exec, pdis_exec,
+                                          g_true, cur_soc, u_now, 0.0)
+    return p2, pch2, pdis2, cur2, deficit
+
+
 # ── Shared inner loop ──────────────────────────────────────────────────────────
 def _run(
     scenario:   str,          # 'gne' or 'individual'
@@ -179,8 +222,11 @@ def _run(
     l_min:      float,
     l_max:      float,
     h2_profile: list,
+    opts:       SimOptions | None = None,
 ) -> tuple[SimResults, list[ElzAgent]]:
 
+    if opts is None:
+        opts = SimOptions()
     N, T = len(agents), STEPS_PER_DAY
     rng  = np.random.default_rng(seed)
     # Separate RNG for 65-min-ahead commitment forecasts (keeps DA/RT streams
@@ -222,12 +268,19 @@ def _run(
                 u_fixed=None, mode='dam',
                 p_elec_init=carry_p_elec,
             )
+        elif scenario == 'central':
+            dam_res = solve_central(
+                agents, dam_fc['da_price'], np.zeros(N), dam_fc['ren'],
+                H_DA, DT_DA, bat_soc_dam, l_min=l_min, l_max=l_max,
+                u_fixed=None, mode='dam', p_elec_init=carry_p_elec,
+            )
         else:  # individual
             dam_res = solve_individual(
                 agents, dam_fc['da_price'], np.zeros(N), dam_fc['ren'],
                 H_DA, DT_DA, bat_soc_dam,
                 l_min=l_min, u_fixed=None, mode='dam',
                 p_elec_init=carry_p_elec,
+                dam_u_per_step=opts.dam_u_per_step,
             )
 
         arr['p_da'][d]    = dam_res.p.T      # (24, N)
@@ -291,11 +344,26 @@ def _run(
                     h2_target_commit[i, k] = max(
                         0.0, H2_RTM_MARGIN * h2_dam_cum[t_k, i] - proj_acc)
 
-            if scenario == 'gne':
-                u_c = commit_u_gne(
-                    agents, lam_c, g_c, H_RT, DT_RT, soc, l_min, l_max,
-                    p_elec_init=cur_p_elec, h2_target_rtm=h2_target_commit,
-                )
+            if scenario in ('gne', 'central'):
+                if scenario == 'gne' and opts.commit_mode == 'admm':
+                    u_c, cres = commit_u_gne_admm(
+                        agents, lam_c, g_c, H_RT, DT_RT, soc, l_min, l_max,
+                        rho=rho_rt, tol=tol_rt,
+                        p_elec_init=cur_p_elec, h2_target_rtm=h2_target_commit,
+                    )
+                    arr['commit_iters'][d, h] = cres.n_iter
+                    arr['commit_conv'][d, h]  = cres.converged
+                    if opts.commit_shadow:
+                        arr['u_commit_shadow'][d, h] = commit_u_gne(
+                            agents, lam_c, g_c, H_RT, DT_RT, soc, l_min, l_max,
+                            p_elec_init=cur_p_elec, h2_target_rtm=h2_target_commit,
+                        )
+                else:
+                    u_c = commit_u_gne(
+                        agents, lam_c, g_c, H_RT, DT_RT, soc, l_min, l_max,
+                        p_elec_init=cur_p_elec, h2_target_rtm=h2_target_commit,
+                    )
+                arr['u_commit'][d, h] = u_c
                 # honor the day-ahead participation schedule (H2 feasibility floor)
                 arr['u_sched'][d, h] = np.maximum(u_c, u_dam[:, h])
             else:
@@ -308,6 +376,7 @@ def _run(
                         ag, lam_c, g_c[i], H_RT, DT_RT, float(soc[i]), l_min,
                         p_elec_init=cur_p_elec[i], h2_target_rtm=h2_target_commit[i],
                     )
+                    arr['u_commit'][d, h, i] = int(u_c)
                     arr['u_sched'][d, h, i] = max(int(u_c), int(u_dam[i, h]))
 
         # Pre-commit hours 0 and 1 (no 65-min lead available at day start)
@@ -360,12 +429,22 @@ def _run(
                     u_fixed=u_now, mode='rtm',
                     p_elec_init=cur_p_elec, h2_target_rtm=h2_target_rtm,
                 )
+            elif scenario == 'central':
+                rtm = solve_central(
+                    agents, lam_t, p_da_eff, g_fc, H_RT, DT_RT, cur_soc,
+                    l_min=l_min * int(u_now.any()), l_max=l_max,
+                    u_fixed=u_now, mode='rtm',
+                    p_elec_init=cur_p_elec, h2_target_rtm=h2_target_rtm,
+                )
+                arr['central_slack'][d, t] = rtm.agg_slack
+                arr['central_skipped'][d, t] = rtm.n_skipped
             else:  # individual
                 rtm = solve_individual(
                     agents, lam_t, p_da_eff, g_fc,
                     H_RT, DT_RT, cur_soc,
                     l_min=l_min, u_fixed=u_now, mode='rtm',
                     p_elec_init=cur_p_elec, h2_target_rtm=h2_target_rtm,
+                    rt_rule_b_per_step=opts.rt_rule_b_per_step,
                 )
 
             arr['rt_iters'][d, t] = getattr(rtm, 'n_iter', 1)
@@ -378,6 +457,11 @@ def _run(
                 agents, rtm.p[:, 0], rtm.p_ch[:, 0], rtm.p_dis[:, 0],
                 g_true, cur_soc, u_now, exec_l_min
             )
+            if opts.exec_floor and scenario != 'individual':
+                p_exec, pch_exec, pdis_exec, curtail_t, added = _enforce_agg_floor(
+                    agents, p_exec, pch_exec, pdis_exec, curtail_t,
+                    g_true, cur_soc, u_now, l_min)
+                arr['floor_fix_kw'][d, t] = added
 
             # H₂ production and SoC update
             g_eff    = g_true - curtail_t
@@ -444,7 +528,7 @@ def _run(
         else:
             u_rate = arr['u_sched'][d].mean(axis=0)
             print(
-                f"Day {d+1}/{n_days}:  Individual  "
+                f"Day {d+1}/{n_days}:  {scenario.capitalize()}  "
                 f"u-rate {' '.join(f'{n}={r:.2f}' for n,r in zip(names, u_rate))}  |  "
                 f"H2 {' '.join(f'{n}={p}' for n,p in zip(names, pcts))}"
             )
@@ -462,6 +546,9 @@ def _run(
         agg=arr['agg'],
         lmin_bind=arr['lmin_b'], lmax_bind=arr['lmax_b'],
         curtail=arr['curtail'],  participation=arr['u_sched'],
+        extra={k: arr[k] for k in ('u_commit', 'u_commit_shadow', 'commit_iters',
+                                   'commit_conv', 'floor_fix_kw', 'central_slack',
+                                   'central_skipped')},
     )
     return res, agents
 
@@ -479,12 +566,14 @@ def run_gne(
     l_min:      float       = 100.0,
     l_max:      float       = float('inf'),
     h2_profile: list | None = None,
+    opts:       SimOptions | None = None,
+    scenario:   str         = 'gne',     # 'central' → B5 centralized benchmark
 ) -> tuple[SimResults, list[ElzAgent]]:
     """Run GNE coalition simulation (MIQP-ADMM, Fabiani et al. 2022)."""
     if h2_profile is None:
         h2_profile = [1.00, 1.00, 1.00, 1.00, 0.90, 0.65, 0.45]
-    return _run('gne', agents, n_days, start_date, seed,
-                rho, rho_da, tol_rt, tol_da, l_min, l_max, h2_profile)
+    return _run(scenario, agents, n_days, start_date, seed,
+                rho, rho_da, tol_rt, tol_da, l_min, l_max, h2_profile, opts)
 
 
 def run_individual(
@@ -494,9 +583,10 @@ def run_individual(
     seed:       int         = 42,
     l_min:      float       = 100.0,
     h2_profile: list | None = None,
+    opts:       SimOptions | None = None,
 ) -> tuple[SimResults, list[ElzAgent]]:
     """Run individual market participation simulation (N independent MIQPs)."""
     if h2_profile is None:
         h2_profile = [1.00, 1.00, 1.00, 1.00, 0.90, 0.65, 0.45]
     return _run('individual', agents, n_days, start_date, seed,
-                0.0, 0.0, 1.0, 5.0, l_min, float('inf'), h2_profile)
+                0.0, 0.0, 1.0, 5.0, l_min, float('inf'), h2_profile, opts)

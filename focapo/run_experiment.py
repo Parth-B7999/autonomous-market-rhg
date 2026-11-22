@@ -35,12 +35,21 @@ import simulation_sc                                      # noqa: E402
 from agents import ElzAgent, DT_RT                        # noqa: E402
 import agents_med as P                                    # noqa: E402
 
-# Options that later phases implement. Phase A accepts only the paper values.
-_NOT_YET = {
-    'scenario': ({'central'}, 'Phase B5'),
-    'commit_mode': ({'admm'}, 'Phase B1'),
-    'baseline': ({'fixed'}, 'Phase B2-B4'),
-}
+# Options that later phases implement.
+_NOT_YET: dict = {}
+
+# --baseline fixed turns on all talk fixes; --fixes picks a subset (e.g. 'b2').
+_ALL_FIXES = ('b2', 'b3', 'b4')
+
+
+def sim_options(args) -> 'simulation_sc.SimOptions':
+    fixes = set(args.fix_set)
+    return simulation_sc.SimOptions(
+        commit_mode=args.commit_mode,
+        dam_u_per_step='b2' in fixes,
+        rt_rule_b_per_step='b3' in fixes,
+        exec_floor='b4' in fixes,
+    )
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -53,7 +62,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                     help='multiplies all forecast noise std devs (0 = perfect forecast)')
     ap.add_argument('--commit-mode', choices=['central', 'admm'], default='central',
                     help='GNE hourly commitment: centralized MIQP (paper) or ADMM')
-    ap.add_argument('--baseline', choices=['paper', 'fixed'], default='paper')
+    ap.add_argument('--baseline', choices=['paper', 'fixed'], default='paper',
+                    help='fixed = B2 hourly DA on/off + B3 per-step RT increment rule '
+                         '(individual) + B4 aggregate floor at execution (gne/central)')
+    ap.add_argument('--fixes', default=None,
+                    help="override the fix set, comma list of b2,b3,b4 (e.g. 'b2'); "
+                         "'none' = paper")
     ap.add_argument('--agents', default='all',
                     help="agent subset as 0-based indices, e.g. '0,2,5' (default all 6)")
     ap.add_argument('--l-min', type=float, default=P.L_MIN)
@@ -69,6 +83,14 @@ def parse_args(argv=None) -> argparse.Namespace:
             ap.error(f"--{key.replace('_', '-')} {getattr(args, key)} is not implemented yet ({phase})")
     if args.noise_scale != 1.0:
         ap.error('--noise-scale is not implemented yet (Phase C)')
+    if args.fixes is None:
+        args.fix_set = list(_ALL_FIXES) if args.baseline == 'fixed' else []
+    elif args.fixes.strip().lower() == 'none':
+        args.fix_set = []
+    else:
+        args.fix_set = sorted({x.strip().lower() for x in args.fixes.split(',') if x.strip()})
+        if not set(args.fix_set) <= set(_ALL_FIXES):
+            ap.error(f'--fixes must be a subset of {",".join(_ALL_FIXES)}')
 
     if args.agents == 'all':
         args.agent_idx = list(range(len(P.FLEET_DICTS)))
@@ -78,31 +100,37 @@ def parse_args(argv=None) -> argparse.Namespace:
             ap.error(f'--agents must be indices in 0..{len(P.FLEET_DICTS) - 1}')
     if args.out is None:
         tag = '' if args.agents == 'all' else '_S' + ''.join(map(str, args.agent_idx))
+        fx = 'paper' if not args.fix_set else '-'.join(args.fix_set)
+        cm = f'_commit-{args.commit_mode}' if args.scenario == 'gne' else ''
         args.out = str(ROOT / 'results' /
-                       f'{args.scenario}_{args.baseline}_{args.start_date}_s{args.seed}{tag}')
+                       f'{args.scenario}_{fx}{cm}_{args.start_date}_s{args.seed}{tag}')
     return args
 
 
 # ── solver-call recorder (timing + iterations, no change to the solver) ────────
 class _Recorder:
     def __init__(self):
-        self.calls = []   # (kind, n_iter, converged, wall_s)
+        # (kind, n_iter, converged, wall_s, serial_agent_s, parallel_agent_s)
+        self.calls = []
 
     def wrap(self, fn, kind_of):
         def inner(*a, **k):
             t0 = time.perf_counter()
             out = fn(*a, **k)
             wall = time.perf_counter() - t0
-            self.calls.append((kind_of(a, k), int(getattr(out, 'n_iter', 1)),
-                               bool(getattr(out, 'converged', True)), wall))
+            r = out[1] if isinstance(out, tuple) else out     # commit_u_gne_admm → (u, res)
+            ta = getattr(r, 't_agents', None)
+            ser = float(ta.sum()) if ta is not None and ta.size else np.nan
+            par = float(ta.max(axis=1).sum()) if ta is not None and ta.size else np.nan
+            self.calls.append((kind_of(a, k), int(getattr(r, 'n_iter', 1)),
+                               bool(getattr(r, 'converged', True)), wall, ser, par))
             return out
         return inner
 
     def of(self, kind):
         c = [x for x in self.calls if x[0] == kind]
-        return (np.array([x[1] for x in c], dtype=int),
-                np.array([x[2] for x in c], dtype=bool),
-                np.array([x[3] for x in c], dtype=float))
+        return tuple(np.array([x[j] for x in c], dtype=t)
+                     for j, t in zip(range(1, 6), (int, bool, float, float, float)))
 
 
 def _install_recorder() -> _Recorder:
@@ -110,7 +138,10 @@ def _install_recorder() -> _Recorder:
     mode = lambda a, k: k.get('mode', 'commit')          # noqa: E731
     simulation_sc.solve_gne = rec.wrap(simulation_sc.solve_gne, mode)
     simulation_sc.solve_individual = rec.wrap(simulation_sc.solve_individual, mode)
+    simulation_sc.solve_central = rec.wrap(simulation_sc.solve_central, mode)
     simulation_sc.commit_u_gne = rec.wrap(simulation_sc.commit_u_gne, lambda a, k: 'commit')
+    simulation_sc.commit_u_gne_admm = rec.wrap(simulation_sc.commit_u_gne_admm,
+                                               lambda a, k: 'commit_admm')
     simulation_sc.commit_u_individual = rec.wrap(simulation_sc.commit_u_individual,
                                                  lambda a, k: 'commit')
     return rec
@@ -136,20 +167,23 @@ def main(argv=None) -> None:
     fleet = [ElzAgent(h2_target_kg_day=0.0, **d) for d in dicts]
     rec = _install_recorder()
 
-    print(f'scenario={args.scenario} baseline={args.baseline} commit={args.commit_mode} '
-          f'start={args.start_date} days={args.n_days} seed={args.seed} '
-          f'agents={[d["name"] for d in dicts]} -> {out}')
+    opts = sim_options(args)
+    print(f'scenario={args.scenario} baseline={args.baseline} fixes={args.fix_set} '
+          f'commit={args.commit_mode} start={args.start_date} days={args.n_days} '
+          f'seed={args.seed} agents={[d["name"] for d in dicts]} -> {out}')
     t0 = time.perf_counter()
-    if args.scenario == 'gne':
+    if args.scenario in ('gne', 'central'):
         res, agents = simulation_sc.run_gne(
             fleet, n_days=args.n_days, start_date=args.start_date, seed=args.seed,
             rho=args.rho_rt, rho_da=args.rho_da, tol_rt=args.tol_rt, tol_da=args.tol_da,
-            l_min=args.l_min, l_max=float('inf'), h2_profile=P.H2_DEMAND_PROFILE)
+            l_min=args.l_min, l_max=float('inf'), h2_profile=P.H2_DEMAND_PROFILE,
+            opts=opts, scenario=args.scenario)
     else:
         res, agents = simulation_sc.run_individual(
             fleet, n_days=args.n_days, start_date=args.start_date, seed=args.seed,
-            l_min=args.l_min, h2_profile=P.H2_DEMAND_PROFILE)
+            l_min=args.l_min, h2_profile=P.H2_DEMAND_PROFILE, opts=opts)
     wall_total = time.perf_counter() - t0
+    ex = res.extra
 
     # ── financials.csv ────────────────────────────────────────────────────────
     rows = []
@@ -173,9 +207,12 @@ def main(argv=None) -> None:
             w.writerow([r['agent']] + [f'{r[c]:.4f}' for c in cols[1:]])
 
     # ── solver stats ──────────────────────────────────────────────────────────
-    rt_it, rt_cv, rt_wall = rec.of('rtm')
-    da_it, da_cv, da_wall = rec.of('dam')
-    _, _, cm_wall = rec.of('commit')
+    rt_it, rt_cv, rt_wall, rt_ser, rt_par = rec.of('rtm')
+    da_it, da_cv, da_wall, _, _ = rec.of('dam')
+    _, _, cm_wall, _, _ = rec.of('commit')
+    ca_it, ca_cv, ca_wall, ca_ser, ca_par = rec.of('commit_admm')
+    uc, ush = ex['u_commit'], ex['u_commit_shadow']
+    both = (uc >= 0) & (ush >= 0)
     stats = dict(
         wall_total_s=wall_total,
         n_rt_steps=int(res.rt_iters.size),
@@ -192,6 +229,24 @@ def main(argv=None) -> None:
         commit_wall_total_s=float(cm_wall.sum()),
         agg_below_lmin_steps=int(((res.agg > 1e-6) & (res.agg < args.l_min - 1e-6)).sum()),
         agg_min_positive_kw=float(res.agg[res.agg > 1e-6].min()) if (res.agg > 1e-6).any() else None,
+        # B6: agent MIQPs run in series; 'parallel' = Σ_iter max_agent time
+        rt_agent_serial_total_s=float(np.nansum(rt_ser)) if rt_ser.size else None,
+        rt_agent_parallel_total_s=float(np.nansum(rt_par)) if rt_par.size else None,
+        # B1: distributed commitment
+        commit_admm_calls=int(ca_it.size),
+        commit_admm_iter_mean=float(ca_it.mean()) if ca_it.size else None,
+        commit_admm_conv_pct=float(ca_cv.mean() * 100) if ca_cv.size else None,
+        commit_admm_wall_total_s=float(ca_wall.sum()) if ca_wall.size else None,
+        commit_admm_parallel_total_s=float(np.nansum(ca_par)) if ca_par.size else None,
+        commit_agree_with_central_pct=float((uc[both] == ush[both]).mean() * 100) if both.any() else None,
+        commit_agree_n=int(both.sum()),
+        # B4 / B5
+        floor_fix_steps=int((ex['floor_fix_kw'] > 1e-6).sum()),
+        floor_fix_max_kw=float(ex['floor_fix_kw'].max()),
+        central_slack_steps=int((np.nan_to_num(ex['central_slack']) > 1e-6).sum()),
+        central_steps_agent_dropped=int((ex['central_skipped'] > 0).sum()),
+        central_steps_unsolved=int((ex['central_skipped'] < 0).sum()),
+        agent_hours_in_market=int(res.participation.sum()),
     )
     with open(out / 'admm_stats.json', 'w') as f:
         json.dump(stats, f, indent=2)
@@ -209,6 +264,8 @@ def main(argv=None) -> None:
         da_iters=res.da_iters, da_conv=res.da_conv,
         rt_iters=res.rt_iters, rt_conv=res.rt_conv,
         rt_wall_s=rt_wall, da_wall_s=da_wall, commit_wall_s=cm_wall,
+        rt_agent_serial_s=rt_ser, rt_agent_parallel_s=rt_par,
+        **ex,
     )
 
     # ── run_params.json ───────────────────────────────────────────────────────

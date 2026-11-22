@@ -49,6 +49,7 @@ import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
 import sys
+import time
 from pathlib import Path
 
 # Keep THIS folder ahead of the parent on sys.path (the parent also defines a
@@ -105,6 +106,8 @@ class GNEResult:
     converged:  bool
     primal_res: float
     dual_res:   float
+    agg_proj:   Optional[np.ndarray] = None   # (H,) last projected aggregate (z-update)
+    t_agents:   Optional[np.ndarray] = None   # (n_iter, N) local MIQP wall time [s]
 
 
 @dataclass
@@ -193,6 +196,8 @@ def _solve_agent(
     p_elec_init: float = 0.0,
     h2_target_rtm: Optional[np.ndarray] = None,  # (H,) cumulative catch-up target
     l_min_dev: float = 0.0,  # Rule B: min upward RT deviation from DA (0 = Rule A)
+    u_per_step: bool = False,       # B2 fix: one market binary per step (paper: one per horizon)
+    rule_b_per_step: bool = False,  # B3 fix: one Rule-B binary per step (paper: one per hour)
 ) -> AgentSol:
     """
     Single-agent MIQP with ADMM augmentation and proximal term.
@@ -232,7 +237,16 @@ def _solve_agent(
     p = m.addVars(H, lb=0.0, ub=float(p_ub), name='p')
 
     # ── semi-continuous market participation:  p ∈ {0} ∪ [L_min, P_max] ────────
-    if u_fixed is None:
+    u_steps = None
+    if u_fixed is None and u_per_step:
+        # B2 fix: p_k ∈ {0} ∪ [L_min, P_max] with its own u_k (hourly DA on/off
+        # when dt = 1 h).  Returned u = 1 if any step is in the market.
+        u_var = None
+        u_steps = m.addVars(H, vtype=GRB.BINARY, name='u_k')
+        for k in range(H):
+            m.addConstr(p[k] >= float(l_min) * u_steps[k], name=f'sc_lb_{k}')
+            m.addConstr(p[k] <= float(p_ub)  * u_steps[k], name=f'sc_ub_{k}')
+    elif u_fixed is None:
         u_var = m.addVar(vtype=GRB.BINARY, name='u')
         for k in range(H):
             m.addConstr(p[k] >= float(l_min) * u_var, name=f'sc_lb_{k}')
@@ -254,7 +268,16 @@ def _solve_agent(
         # the whole operating hour, so all 12 steps share the same upward-deviation
         # gate.  This matches PJM practice where you submit one RT offer per hour.
         p_da_val = float(p_da)
-        if l_min_dev > 0.0 and p_da_val > 1.0:
+        if l_min_dev > 0.0 and p_da_val > 1.0 and rule_b_per_step:
+            # B3 fix: per-step gate, same granularity as the GNE aggregate
+            # projection _project_rule_b_agg.
+            v_k = m.addVars(H, vtype=GRB.BINARY, name='v_rt_k')
+            for k in range(H):
+                m.addConstr(p[k] <= p_da_val + (float(p_ub) - p_da_val) * v_k[k],
+                            name=f'rtb_ub_{k}')
+                m.addConstr(p[k] >= (p_da_val + float(l_min_dev)) * v_k[k],
+                            name=f'rtb_lb_{k}')
+        elif l_min_dev > 0.0 and p_da_val > 1.0:
             v_rt = m.addVar(vtype=GRB.BINARY, name='v_rt')   # one per hour, not per step
             for k in range(H):
                 # v_rt=0 → ALL steps ≤ p_da  (no upward deviation this hour)
@@ -355,6 +378,8 @@ def _solve_agent(
         p_elec_sol = np.array([p_elec[k].X for k in range(H)])
         if u_var is not None:
             u_val = int(round(u_var.X))
+        elif u_steps is not None:
+            u_val = int(max(round(u_steps[k].X) for k in range(H)))
         else:
             u_val = 0 if (u_fixed is not None and int(u_fixed) == 0) else 1
         ok = True
@@ -409,7 +434,11 @@ def solve_gne(
     """
     N         = len(agents)
     add_h2    = (mode == 'dam')
-    gamma_arr = [0.0 if mode == 'dam' else ag.gamma for ag in agents]
+    # mode 'commit' (B1, distributed hourly commitment): gamma = 0, no daily H2
+    # floor, cumulative catch-up target via h2_target_rtm, u free.
+    gamma_arr = [0.0 if mode in ('dam', 'commit') else ag.gamma for ag in agents]
+    t_agents  = []       # per-iteration local MIQP wall times (B6)
+    s_star    = None
 
     # Warm-start z from the per-agent unconstrained minimiser (individual-optimal
     # point), not from zero.  Starting at z=0 creates a downward bias: agents are
@@ -446,10 +475,12 @@ def solve_gne(
         z_prev = [zi.copy() for zi in z]
 
         # ── x-update: each agent solves its local MIQP ───────────────────────
+        t_it = np.zeros(N)
         for i, ag in enumerate(agents):
             u_i  = None if u_fixed is None else int(u_fixed[i])
             pe_i = 0.0 if p_elec_init is None else float(p_elec_init[i])
             h2_i = h2_target_rtm[i] if h2_target_rtm is not None else None
+            _t0 = time.perf_counter()
             sol = _solve_agent(
                 ag, H, dt, float(bat_soc[i]),
                 lam, float(p_da[i]), g_ren[i],
@@ -460,11 +491,13 @@ def solve_gne(
                 # Rule B enforced at aggregate level in z-update; not per-agent.
                 l_min_dev=0.0,
             )
+            t_it[i]   = time.perf_counter() - _t0
             p[i]      = sol.p
             p_ch[i]   = sol.p_ch
             p_dis[i]  = sol.p_dis
             pe_out[i] = sol.p_elec
             u_sol[i]  = sol.u
+        t_agents.append(t_it)
 
         # ── z-update: project aggregate over in-market agents only ────────────
         if u_fixed is not None:
@@ -517,6 +550,8 @@ def solve_gne(
         converged = converged,
         primal_res= primal_res,
         dual_res  = dual_res,
+        agg_proj  = None if s_star is None else np.asarray(s_star, dtype=float).copy(),
+        t_agents  = np.array(t_agents),
     )
 
 
@@ -534,6 +569,8 @@ def solve_individual(
     mode:    str,
     p_elec_init: Optional[np.ndarray] = None, # (N,)
     h2_target_rtm: Optional[np.ndarray] = None, # (N, H)
+    dam_u_per_step: bool = False,       # B2 fix (DAM: hourly on/off)
+    rt_rule_b_per_step: bool = False,   # B3 fix (RTM: per-step increment gate)
 ) -> IndResult:
     """Solve N independent single-agent MIQPs (no coupling, no ADMM)."""
     N      = len(agents)
@@ -558,6 +595,8 @@ def solve_individual(
             p_elec_init=pe_i, h2_target_rtm=h2_i,
             # Rule B: RT upward deviation must be ≥ L_min or zero (not in DAM/commitment)
             l_min_dev=l_min if mode == 'rtm' else 0.0,
+            u_per_step=(dam_u_per_step and mode == 'dam'),
+            rule_b_per_step=(rt_rule_b_per_step and mode == 'rtm'),
         )
         p[i]      = sol.p
         p_ch[i]   = sol.p_ch
@@ -723,3 +762,42 @@ def commit_u_individual(
         p_elec_init=p_elec_init, h2_target_rtm=h2_target_rtm,
     )
     return sol.u
+
+
+# ── Hour-ahead commitment: GNE, distributed (B1, --commit-mode admm) ───────────
+def commit_u_gne_admm(
+    agents:  list[ElzAgent],
+    lam:     np.ndarray,    # (H,) hour-ahead price forecast
+    g_ren:   np.ndarray,    # (N,H) hour-ahead renewable forecast
+    H:       int,
+    dt:      float,
+    bat_soc: np.ndarray,    # (N,) SoC at commitment time
+    l_min:   float,
+    l_max:   float,
+    rho:     float,
+    tol:     float,
+    max_iter: int = 300,
+    p_elec_init:   Optional[np.ndarray] = None, # (N,)
+    h2_target_rtm: Optional[np.ndarray] = None, # (N,H) cumulative catch-up target
+) -> tuple[np.ndarray, GNEResult]:
+    """
+    Distributed version of commit_u_gne: same ADMM as solve_gne (agents share
+    only the aggregate import), mode='commit' → gamma = 0, no daily H2 floor,
+    cumulative catch-up target, u free in each local MIQP; the z-update projects
+    the per-step aggregate onto {0} ∪ [L_min, L_max] (_project_sc_agg).
+
+    u_i = 1 if agent i imports > 1 kW in any step of the horizon; all u_i = 0
+    if the projected aggregate is 0 at every step.
+    Returns (u, GNEResult) so the caller can log iterations and timing.
+    """
+    N = len(agents)
+    res = solve_gne(
+        agents, lam, np.zeros(N), g_ren, H, dt, bat_soc,
+        rho=rho, max_iter=max_iter, tol=tol, l_min=l_min, l_max=l_max,
+        u_fixed=None, mode='commit',
+        p_elec_init=p_elec_init, h2_target_rtm=h2_target_rtm,
+    )
+    u = (res.p > 1.0).any(axis=1).astype(int)
+    if res.agg_proj is not None and np.all(res.agg_proj <= 1e-9):
+        u[:] = 0
+    return u, res
