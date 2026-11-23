@@ -50,6 +50,7 @@ def sim_options(args) -> 'simulation_sc.SimOptions':
         rt_rule_b_per_step='b3' in fixes,
         exec_floor='b4' in fixes,
         forecaster=args.forecaster,
+        scenarios=args.scenarios,
     )
 
 
@@ -64,6 +65,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument('--forecaster', choices=['noise', 'xgb'], default='noise',
                     help="noise = truth + Gaussian noise (paper); xgb = trained XGBoost "
                          "forecaster using only data before the week (forecaster/)")
+    ap.add_argument('--scenarios', type=int, default=0,
+                    help='>0: stochastic DAM/RTM over S forecast-error scenarios (needs --forecaster xgb)')
     ap.add_argument('--commit-mode', choices=['central', 'admm'], default='central',
                     help='GNE hourly commitment: centralized MIQP (paper) or ADMM')
     ap.add_argument('--baseline', choices=['paper', 'fixed'], default='paper',
@@ -107,6 +110,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         fx = 'paper' if not args.fix_set else '-'.join(args.fix_set)
         cm = f'_commit-{args.commit_mode}' if args.scenario == 'gne' else ''
         cm += '_xgb' if args.forecaster == 'xgb' else ''
+        cm += f'_S{args.scenarios}' if args.scenarios else ''
         args.out = str(ROOT / 'results' /
                        f'{args.scenario}_{fx}{cm}_{args.start_date}_s{args.seed}{tag}')
     return args
@@ -144,6 +148,8 @@ def _install_recorder() -> _Recorder:
     simulation_sc.solve_gne = rec.wrap(simulation_sc.solve_gne, mode)
     simulation_sc.solve_individual = rec.wrap(simulation_sc.solve_individual, mode)
     simulation_sc.solve_central = rec.wrap(simulation_sc.solve_central, mode)
+    simulation_sc.solve_gne_stoch = rec.wrap(simulation_sc.solve_gne_stoch, mode)
+    simulation_sc.solve_individual_stoch = rec.wrap(simulation_sc.solve_individual_stoch, mode)
     simulation_sc.commit_u_gne = rec.wrap(simulation_sc.commit_u_gne, lambda a, k: 'commit')
     simulation_sc.commit_u_gne_admm = rec.wrap(simulation_sc.commit_u_gne_admm,
                                                lambda a, k: 'commit_admm')
@@ -252,6 +258,8 @@ def main(argv=None) -> None:
         central_steps_agent_dropped=int((ex['central_skipped'] > 0).sum()),
         central_steps_unsolved=int((ex['central_skipped'] < 0).sum()),
         agent_hours_in_market=int(res.participation.sum()),
+        stoch_solves=sys.modules['stochastic'].STATS['solves'] if args.scenarios else None,
+        stoch_time_limit_hits=sys.modules['stochastic'].STATS['time_limit_hits'] if args.scenarios else None,
     )
     with open(out / 'admm_stats.json', 'w') as f:
         json.dump(stats, f, indent=2)

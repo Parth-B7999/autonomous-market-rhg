@@ -36,6 +36,7 @@ from forecasting import load_pjm_week, get_day, dam_forecast, rt_forecast  # noq
 from miqp_admm import (solve_gne, solve_individual,                        # noqa
                         commit_u_gne, commit_u_individual, commit_u_gne_admm)
 from central import solve_central                                          # noqa
+from stochastic import solve_gne_stoch, solve_individual_stoch             # noqa
 
 
 # Real-time H2 tracking safety margin.  The RTM controller tracks the DAM
@@ -56,6 +57,7 @@ class SimOptions:
     exec_floor: bool = False          # B4: enforce aggregate L_min at execution (gne/central)
     commit_shadow: bool = True        # with commit_mode='admm', also log the central u
     forecaster: str = 'noise'         # 'noise' (paper: truth + Gaussian noise) | 'xgb' (trained, honest)
+    scenarios: int = 0                # >0: stochastic DAM/RTM with S forecast-error scenarios (needs xgb)
 
 
 # ── Result container (same shape as original simulation.py SimResults) ─────────
@@ -243,6 +245,13 @@ def _run(
             sys.path.insert(0, _focapo)
         from forecaster.provider import XGBForecaster
         fcp = XGBForecaster(start_date, n_days)
+    S = int(opts.scenarios)
+    if S > 0:
+        if fcp is None:
+            raise ValueError('scenarios > 0 needs forecaster="xgb" (scenarios use its error bank)')
+        if scenario == 'central':
+            raise NotImplementedError('stochastic central benchmark is not implemented')
+        srng = np.random.default_rng(seed + 2000)   # same draws for every scenario type
     arr  = _alloc(n_days, T, N)
 
     h2_base   = [0.75 * ag.p_elec_max_kw * ag.eta_kg_per_kwh * 24 for ag in agents]
@@ -267,7 +276,21 @@ def _run(
         dam_fc      = fcp.dam(d, agents) if fcp else dam_forecast(week, d, agents, rng)
         bat_soc_dam = np.array([ag.bat_soc_kwh for ag in agents])
 
-        if scenario == 'gne':
+        if S:
+            sc = fcp.dam_scenarios(d, agents, S, srng)
+            g_s = sc['ren'].transpose(1, 0, 2)          # (N,S,24)
+            if scenario == 'gne':
+                dam_res = solve_gne_stoch(
+                    agents, sc['da_price'], np.zeros(N), g_s, sc['prob'],
+                    H_DA, DT_DA, bat_soc_dam, rho=rho_da, max_iter=2000, tol=tol_da,
+                    l_min=l_min, l_max=l_max, u_fixed=None, mode='dam',
+                    p_elec_init=carry_p_elec)
+            else:
+                dam_res = solve_individual_stoch(
+                    agents, sc['da_price'], np.zeros(N), g_s, sc['prob'],
+                    H_DA, DT_DA, bat_soc_dam, l_min=l_min, u_fixed=None, mode='dam',
+                    p_elec_init=carry_p_elec, dam_u_per_step=opts.dam_u_per_step)
+        elif scenario == 'gne':
             dam_res = solve_gne(
                 agents, dam_fc['da_price'], np.zeros(N), dam_fc['ren'],
                 H_DA, DT_DA, bat_soc_dam,
@@ -431,7 +454,23 @@ def _run(
                         0.0, H2_RTM_MARGIN * h2_dam_cum[t_k, i] - h2_acc[i])
 
             # RTM MIQP dispatch (u locked, δ free every step)
-            if scenario == 'gne':
+            if S:
+                sc = fcp.rt_scenarios(d, t, t, H_RT, agents, S, srng)
+                g_s = sc['ren'].transpose(1, 0, 2)      # (N,S,H)
+                if scenario == 'gne':
+                    rtm = solve_gne_stoch(
+                        agents, sc['lam'], p_da_eff, g_s, sc['prob'], H_RT, DT_RT, cur_soc,
+                        rho=rho_rt, max_iter=300, tol=tol_rt,
+                        l_min=l_min * int(u_now.any()), l_max=l_max,
+                        u_fixed=u_now, mode='rtm',
+                        p_elec_init=cur_p_elec, h2_target_rtm=h2_target_rtm)
+                else:
+                    rtm = solve_individual_stoch(
+                        agents, sc['lam'], p_da_eff, g_s, sc['prob'], H_RT, DT_RT, cur_soc,
+                        l_min=l_min, u_fixed=u_now, mode='rtm',
+                        p_elec_init=cur_p_elec, h2_target_rtm=h2_target_rtm,
+                        rt_rule_b_per_step=opts.rt_rule_b_per_step)
+            elif scenario == 'gne':
                 rtm = solve_gne(
                     agents, lam_t, p_da_eff, g_fc,
                     H_RT, DT_RT, cur_soc,
