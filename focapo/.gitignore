@@ -38,3 +38,4 @@ forecaster/models/
 # CHTC job bundle (rebuild with chtc/make_bundle.sh)
 chtc/bundle.tar.gz
 *.tar.gz
+focapo/chtc/models/

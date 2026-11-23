@@ -38,6 +38,9 @@ from agents import ElzAgent
 STOCH_MIP_GAP = 1e-3
 STOCH_TIME_LIMIT = 3.0
 STATS = {'solves': 0, 'time_limit_hits': 0}
+# DAM daily H2 floor: 'each' = must hold in every scenario (robust),
+# 'expected' = on the probability-weighted production (risk-neutral).
+STOCH_H2_FLOOR = 'each'
 
 
 def _solve_agent_stoch(
@@ -143,9 +146,12 @@ def _solve_agent_stoch(
                 prev = pe[s, k - 1] if k > 0 else float(p_elec_init)
                 m.addConstr(pe[s, k] - prev <= ramp)
                 m.addConstr(prev - pe[s, k] <= ramp)
-        if add_h2 and ag.h2_target_kg_day > 0:
+        if add_h2 and ag.h2_target_kg_day > 0 and STOCH_H2_FLOOR == 'each':
             m.addConstr(gp.quicksum(pe[s, k] for k in range(H)) * ag.eta_kg_per_kwh * dt
                         >= ag.h2_target_kg_day)
+    if add_h2 and ag.h2_target_kg_day > 0 and STOCH_H2_FLOOR == 'expected':
+        m.addConstr(gp.quicksum(float(prob[s]) * pe[s, k] for s in range(S) for k in range(H))
+                    * ag.eta_kg_per_kwh * dt >= ag.h2_target_kg_day)
 
     obj = gp.QuadExpr()
     for s in range(S):

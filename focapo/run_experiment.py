@@ -67,6 +67,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                          "forecaster using only data before the week (forecaster/)")
     ap.add_argument('--scenarios', type=int, default=0,
                     help='>0: stochastic DAM/RTM over S forecast-error scenarios (needs --forecaster xgb)')
+    ap.add_argument('--stoch-h2', choices=['each', 'expected'], default='each',
+                    help='stochastic DAM H2 floor: in every scenario (each) or on expectation')
     ap.add_argument('--commit-mode', choices=['central', 'admm'], default='central',
                     help='GNE hourly commitment: centralized MIQP (paper) or ADMM')
     ap.add_argument('--baseline', choices=['paper', 'fixed'], default='paper',
@@ -111,6 +113,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         cm = f'_commit-{args.commit_mode}' if args.scenario == 'gne' else ''
         cm += '_xgb' if args.forecaster == 'xgb' else ''
         cm += f'_S{args.scenarios}' if args.scenarios else ''
+        cm += '_h2exp' if args.scenarios and args.stoch_h2 == 'expected' else ''
         args.out = str(ROOT / 'results' /
                        f'{args.scenario}_{fx}{cm}_{args.start_date}_s{args.seed}{tag}')
     return args
@@ -179,6 +182,8 @@ def main(argv=None) -> None:
     rec = _install_recorder()
 
     opts = sim_options(args)
+    import stochastic
+    stochastic.STOCH_H2_FLOOR = args.stoch_h2
     print(f'scenario={args.scenario} baseline={args.baseline} fixes={args.fix_set} '
           f'commit={args.commit_mode} start={args.start_date} days={args.n_days} '
           f'seed={args.seed} agents={[d["name"] for d in dicts]} -> {out}')

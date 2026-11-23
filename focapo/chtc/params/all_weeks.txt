@@ -1,0 +1,332 @@
+ind_paper_2024-04-01, 2024-04-01, --scenario individual --forecaster xgb
+ind_fixed_2024-04-01, 2024-04-01, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-04-01, 2024-04-01, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-04-01, 2024-04-01, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-04-08, 2024-04-08, --scenario individual --forecaster xgb
+ind_fixed_2024-04-08, 2024-04-08, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-04-08, 2024-04-08, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-04-08, 2024-04-08, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-04-15, 2024-04-15, --scenario individual --forecaster xgb
+ind_fixed_2024-04-15, 2024-04-15, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-04-15, 2024-04-15, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-04-15, 2024-04-15, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-04-22, 2024-04-22, --scenario individual --forecaster xgb
+ind_fixed_2024-04-22, 2024-04-22, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-04-22, 2024-04-22, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-04-22, 2024-04-22, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-04-29, 2024-04-29, --scenario individual --forecaster xgb
+ind_fixed_2024-04-29, 2024-04-29, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-04-29, 2024-04-29, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-04-29, 2024-04-29, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-05-06, 2024-05-06, --scenario individual --forecaster xgb
+ind_fixed_2024-05-06, 2024-05-06, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-05-06, 2024-05-06, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-05-06, 2024-05-06, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-05-13, 2024-05-13, --scenario individual --forecaster xgb
+ind_fixed_2024-05-13, 2024-05-13, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-05-13, 2024-05-13, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-05-13, 2024-05-13, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-05-20, 2024-05-20, --scenario individual --forecaster xgb
+ind_fixed_2024-05-20, 2024-05-20, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-05-20, 2024-05-20, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-05-20, 2024-05-20, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-05-27, 2024-05-27, --scenario individual --forecaster xgb
+ind_fixed_2024-05-27, 2024-05-27, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-05-27, 2024-05-27, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-05-27, 2024-05-27, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-06-03, 2024-06-03, --scenario individual --forecaster xgb
+ind_fixed_2024-06-03, 2024-06-03, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-06-03, 2024-06-03, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-06-03, 2024-06-03, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-06-10, 2024-06-10, --scenario individual --forecaster xgb
+ind_fixed_2024-06-10, 2024-06-10, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-06-10, 2024-06-10, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-06-10, 2024-06-10, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-06-17, 2024-06-17, --scenario individual --forecaster xgb
+ind_fixed_2024-06-17, 2024-06-17, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-06-17, 2024-06-17, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-06-17, 2024-06-17, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-06-24, 2024-06-24, --scenario individual --forecaster xgb
+ind_fixed_2024-06-24, 2024-06-24, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-06-24, 2024-06-24, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-06-24, 2024-06-24, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-07-01, 2024-07-01, --scenario individual --forecaster xgb
+ind_fixed_2024-07-01, 2024-07-01, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-07-01, 2024-07-01, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-07-01, 2024-07-01, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-07-08, 2024-07-08, --scenario individual --forecaster xgb
+ind_fixed_2024-07-08, 2024-07-08, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-07-08, 2024-07-08, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-07-08, 2024-07-08, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-07-15, 2024-07-15, --scenario individual --forecaster xgb
+ind_fixed_2024-07-15, 2024-07-15, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-07-15, 2024-07-15, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-07-15, 2024-07-15, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-07-22, 2024-07-22, --scenario individual --forecaster xgb
+ind_fixed_2024-07-22, 2024-07-22, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-07-22, 2024-07-22, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-07-22, 2024-07-22, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-07-29, 2024-07-29, --scenario individual --forecaster xgb
+ind_fixed_2024-07-29, 2024-07-29, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-07-29, 2024-07-29, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-07-29, 2024-07-29, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-08-05, 2024-08-05, --scenario individual --forecaster xgb
+ind_fixed_2024-08-05, 2024-08-05, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-08-05, 2024-08-05, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-08-05, 2024-08-05, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-08-12, 2024-08-12, --scenario individual --forecaster xgb
+ind_fixed_2024-08-12, 2024-08-12, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-08-12, 2024-08-12, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-08-12, 2024-08-12, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-08-19, 2024-08-19, --scenario individual --forecaster xgb
+ind_fixed_2024-08-19, 2024-08-19, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-08-19, 2024-08-19, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-08-19, 2024-08-19, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-08-26, 2024-08-26, --scenario individual --forecaster xgb
+ind_fixed_2024-08-26, 2024-08-26, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-08-26, 2024-08-26, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-08-26, 2024-08-26, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-09-02, 2024-09-02, --scenario individual --forecaster xgb
+ind_fixed_2024-09-02, 2024-09-02, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-09-02, 2024-09-02, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-09-02, 2024-09-02, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-09-09, 2024-09-09, --scenario individual --forecaster xgb
+ind_fixed_2024-09-09, 2024-09-09, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-09-09, 2024-09-09, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-09-09, 2024-09-09, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-09-16, 2024-09-16, --scenario individual --forecaster xgb
+ind_fixed_2024-09-16, 2024-09-16, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-09-16, 2024-09-16, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-09-16, 2024-09-16, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-09-23, 2024-09-23, --scenario individual --forecaster xgb
+ind_fixed_2024-09-23, 2024-09-23, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-09-23, 2024-09-23, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-09-23, 2024-09-23, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-09-30, 2024-09-30, --scenario individual --forecaster xgb
+ind_fixed_2024-09-30, 2024-09-30, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-09-30, 2024-09-30, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-09-30, 2024-09-30, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-10-07, 2024-10-07, --scenario individual --forecaster xgb
+ind_fixed_2024-10-07, 2024-10-07, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-10-07, 2024-10-07, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-10-07, 2024-10-07, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-10-14, 2024-10-14, --scenario individual --forecaster xgb
+ind_fixed_2024-10-14, 2024-10-14, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-10-14, 2024-10-14, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-10-14, 2024-10-14, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-10-21, 2024-10-21, --scenario individual --forecaster xgb
+ind_fixed_2024-10-21, 2024-10-21, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-10-21, 2024-10-21, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-10-21, 2024-10-21, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-11-04, 2024-11-04, --scenario individual --forecaster xgb
+ind_fixed_2024-11-04, 2024-11-04, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-11-04, 2024-11-04, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-11-04, 2024-11-04, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-11-11, 2024-11-11, --scenario individual --forecaster xgb
+ind_fixed_2024-11-11, 2024-11-11, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-11-11, 2024-11-11, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-11-11, 2024-11-11, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-11-18, 2024-11-18, --scenario individual --forecaster xgb
+ind_fixed_2024-11-18, 2024-11-18, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-11-18, 2024-11-18, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-11-18, 2024-11-18, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-11-25, 2024-11-25, --scenario individual --forecaster xgb
+ind_fixed_2024-11-25, 2024-11-25, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-11-25, 2024-11-25, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-11-25, 2024-11-25, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-12-02, 2024-12-02, --scenario individual --forecaster xgb
+ind_fixed_2024-12-02, 2024-12-02, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-12-02, 2024-12-02, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-12-02, 2024-12-02, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-12-09, 2024-12-09, --scenario individual --forecaster xgb
+ind_fixed_2024-12-09, 2024-12-09, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-12-09, 2024-12-09, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-12-09, 2024-12-09, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-12-16, 2024-12-16, --scenario individual --forecaster xgb
+ind_fixed_2024-12-16, 2024-12-16, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-12-16, 2024-12-16, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-12-16, 2024-12-16, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2024-12-23, 2024-12-23, --scenario individual --forecaster xgb
+ind_fixed_2024-12-23, 2024-12-23, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2024-12-23, 2024-12-23, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2024-12-23, 2024-12-23, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-01-06, 2025-01-06, --scenario individual --forecaster xgb
+ind_fixed_2025-01-06, 2025-01-06, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-01-06, 2025-01-06, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-01-06, 2025-01-06, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-01-13, 2025-01-13, --scenario individual --forecaster xgb
+ind_fixed_2025-01-13, 2025-01-13, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-01-13, 2025-01-13, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-01-13, 2025-01-13, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-01-20, 2025-01-20, --scenario individual --forecaster xgb
+ind_fixed_2025-01-20, 2025-01-20, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-01-20, 2025-01-20, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-01-20, 2025-01-20, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-01-27, 2025-01-27, --scenario individual --forecaster xgb
+ind_fixed_2025-01-27, 2025-01-27, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-01-27, 2025-01-27, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-01-27, 2025-01-27, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-02-03, 2025-02-03, --scenario individual --forecaster xgb
+ind_fixed_2025-02-03, 2025-02-03, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-02-03, 2025-02-03, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-02-03, 2025-02-03, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-02-10, 2025-02-10, --scenario individual --forecaster xgb
+ind_fixed_2025-02-10, 2025-02-10, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-02-10, 2025-02-10, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-02-10, 2025-02-10, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-02-17, 2025-02-17, --scenario individual --forecaster xgb
+ind_fixed_2025-02-17, 2025-02-17, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-02-17, 2025-02-17, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-02-17, 2025-02-17, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-02-24, 2025-02-24, --scenario individual --forecaster xgb
+ind_fixed_2025-02-24, 2025-02-24, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-02-24, 2025-02-24, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-02-24, 2025-02-24, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-03-10, 2025-03-10, --scenario individual --forecaster xgb
+ind_fixed_2025-03-10, 2025-03-10, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-03-10, 2025-03-10, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-03-10, 2025-03-10, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-03-17, 2025-03-17, --scenario individual --forecaster xgb
+ind_fixed_2025-03-17, 2025-03-17, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-03-17, 2025-03-17, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-03-17, 2025-03-17, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-03-24, 2025-03-24, --scenario individual --forecaster xgb
+ind_fixed_2025-03-24, 2025-03-24, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-03-24, 2025-03-24, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-03-24, 2025-03-24, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-03-31, 2025-03-31, --scenario individual --forecaster xgb
+ind_fixed_2025-03-31, 2025-03-31, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-03-31, 2025-03-31, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-03-31, 2025-03-31, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-04-07, 2025-04-07, --scenario individual --forecaster xgb
+ind_fixed_2025-04-07, 2025-04-07, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-04-07, 2025-04-07, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-04-07, 2025-04-07, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-04-14, 2025-04-14, --scenario individual --forecaster xgb
+ind_fixed_2025-04-14, 2025-04-14, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-04-14, 2025-04-14, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-04-14, 2025-04-14, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-04-21, 2025-04-21, --scenario individual --forecaster xgb
+ind_fixed_2025-04-21, 2025-04-21, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-04-21, 2025-04-21, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-04-21, 2025-04-21, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-04-28, 2025-04-28, --scenario individual --forecaster xgb
+ind_fixed_2025-04-28, 2025-04-28, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-04-28, 2025-04-28, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-04-28, 2025-04-28, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-05-05, 2025-05-05, --scenario individual --forecaster xgb
+ind_fixed_2025-05-05, 2025-05-05, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-05-05, 2025-05-05, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-05-05, 2025-05-05, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-05-12, 2025-05-12, --scenario individual --forecaster xgb
+ind_fixed_2025-05-12, 2025-05-12, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-05-12, 2025-05-12, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-05-12, 2025-05-12, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-05-19, 2025-05-19, --scenario individual --forecaster xgb
+ind_fixed_2025-05-19, 2025-05-19, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-05-19, 2025-05-19, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-05-19, 2025-05-19, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-05-26, 2025-05-26, --scenario individual --forecaster xgb
+ind_fixed_2025-05-26, 2025-05-26, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-05-26, 2025-05-26, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-05-26, 2025-05-26, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-06-02, 2025-06-02, --scenario individual --forecaster xgb
+ind_fixed_2025-06-02, 2025-06-02, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-06-02, 2025-06-02, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-06-02, 2025-06-02, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-06-09, 2025-06-09, --scenario individual --forecaster xgb
+ind_fixed_2025-06-09, 2025-06-09, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-06-09, 2025-06-09, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-06-09, 2025-06-09, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-06-16, 2025-06-16, --scenario individual --forecaster xgb
+ind_fixed_2025-06-16, 2025-06-16, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-06-16, 2025-06-16, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-06-16, 2025-06-16, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-06-23, 2025-06-23, --scenario individual --forecaster xgb
+ind_fixed_2025-06-23, 2025-06-23, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-06-23, 2025-06-23, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-06-23, 2025-06-23, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-06-30, 2025-06-30, --scenario individual --forecaster xgb
+ind_fixed_2025-06-30, 2025-06-30, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-06-30, 2025-06-30, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-06-30, 2025-06-30, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-07-07, 2025-07-07, --scenario individual --forecaster xgb
+ind_fixed_2025-07-07, 2025-07-07, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-07-07, 2025-07-07, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-07-07, 2025-07-07, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-07-14, 2025-07-14, --scenario individual --forecaster xgb
+ind_fixed_2025-07-14, 2025-07-14, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-07-14, 2025-07-14, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-07-14, 2025-07-14, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-07-21, 2025-07-21, --scenario individual --forecaster xgb
+ind_fixed_2025-07-21, 2025-07-21, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-07-21, 2025-07-21, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-07-21, 2025-07-21, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-07-28, 2025-07-28, --scenario individual --forecaster xgb
+ind_fixed_2025-07-28, 2025-07-28, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-07-28, 2025-07-28, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-07-28, 2025-07-28, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-08-04, 2025-08-04, --scenario individual --forecaster xgb
+ind_fixed_2025-08-04, 2025-08-04, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-08-04, 2025-08-04, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-08-04, 2025-08-04, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-08-11, 2025-08-11, --scenario individual --forecaster xgb
+ind_fixed_2025-08-11, 2025-08-11, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-08-11, 2025-08-11, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-08-11, 2025-08-11, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-08-18, 2025-08-18, --scenario individual --forecaster xgb
+ind_fixed_2025-08-18, 2025-08-18, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-08-18, 2025-08-18, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-08-18, 2025-08-18, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-08-25, 2025-08-25, --scenario individual --forecaster xgb
+ind_fixed_2025-08-25, 2025-08-25, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-08-25, 2025-08-25, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-08-25, 2025-08-25, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-09-01, 2025-09-01, --scenario individual --forecaster xgb
+ind_fixed_2025-09-01, 2025-09-01, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-09-01, 2025-09-01, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-09-01, 2025-09-01, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-09-08, 2025-09-08, --scenario individual --forecaster xgb
+ind_fixed_2025-09-08, 2025-09-08, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-09-08, 2025-09-08, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-09-08, 2025-09-08, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-09-15, 2025-09-15, --scenario individual --forecaster xgb
+ind_fixed_2025-09-15, 2025-09-15, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-09-15, 2025-09-15, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-09-15, 2025-09-15, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-09-22, 2025-09-22, --scenario individual --forecaster xgb
+ind_fixed_2025-09-22, 2025-09-22, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-09-22, 2025-09-22, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-09-22, 2025-09-22, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-09-29, 2025-09-29, --scenario individual --forecaster xgb
+ind_fixed_2025-09-29, 2025-09-29, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-09-29, 2025-09-29, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-09-29, 2025-09-29, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-10-06, 2025-10-06, --scenario individual --forecaster xgb
+ind_fixed_2025-10-06, 2025-10-06, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-10-06, 2025-10-06, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-10-06, 2025-10-06, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-10-13, 2025-10-13, --scenario individual --forecaster xgb
+ind_fixed_2025-10-13, 2025-10-13, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-10-13, 2025-10-13, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-10-13, 2025-10-13, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-10-20, 2025-10-20, --scenario individual --forecaster xgb
+ind_fixed_2025-10-20, 2025-10-20, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-10-20, 2025-10-20, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-10-20, 2025-10-20, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-11-03, 2025-11-03, --scenario individual --forecaster xgb
+ind_fixed_2025-11-03, 2025-11-03, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-11-03, 2025-11-03, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-11-03, 2025-11-03, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-11-10, 2025-11-10, --scenario individual --forecaster xgb
+ind_fixed_2025-11-10, 2025-11-10, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-11-10, 2025-11-10, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-11-10, 2025-11-10, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-11-17, 2025-11-17, --scenario individual --forecaster xgb
+ind_fixed_2025-11-17, 2025-11-17, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-11-17, 2025-11-17, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-11-17, 2025-11-17, --scenario central --baseline fixed --forecaster xgb
+ind_paper_2025-11-24, 2025-11-24, --scenario individual --forecaster xgb
+ind_fixed_2025-11-24, 2025-11-24, --scenario individual --baseline fixed --forecaster xgb
+gne_fixed_2025-11-24, 2025-11-24, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb
+central_fixed_2025-11-24, 2025-11-24, --scenario central --baseline fixed --forecaster xgb
