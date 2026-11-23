@@ -102,6 +102,9 @@ def weekly(df: pd.DataFrame, out: Path) -> dict:
     W['h2_change_kg'] = tot['h2_kg']['gne_fixed'] - tot['h2_kg']['ind_fixed']
     W['gap_central'] = W.gne - W.central
     W['gap_central_pct'] = 100 * W.gap_central / W.central.abs()
+    if 'gne_loose' in P:
+        W['gne_loose'] = P['gne_loose']
+        W['loose_minus_tight'] = W.gne_loose - W.gne
     W = W.dropna(subset=need[:1] + ['gne'])
 
     ag = df[(df.agent != 'TOTAL') & df.kind.isin(['ind_fixed', 'gne_fixed'])].pivot_table(
@@ -118,6 +121,8 @@ def weekly(df: pd.DataFrame, out: Path) -> dict:
     per_agent.to_csv(out / 'per_agent_gain.csv')
     stats = {k: _q(W[k]) for k in ('gain_fixed', 'gain_fixed_pct', 'gain_paper', 'curtail_reduction_kwh',
                                    'h2_change_kg', 'gap_central', 'gap_central_pct')}
+    if 'loose_minus_tight' in W:
+        stats['loose_minus_tight'] = _q(W.loose_minus_tight)
     stats['share_weeks_all_better'] = float(W.all_agents_better_off.mean() * 100)
     stats['share_weeks_gne_wins'] = float((W.gain_fixed > 0).mean() * 100)
     pd.DataFrame(stats).T.to_csv(out / 'weekly_stats.csv')
@@ -243,13 +248,15 @@ def coalitions(df: pd.DataFrame, out: Path) -> dict:
 
 
 # ── stochastic vs deterministic (replaces E3) ──────────────────────────────────
-def stochastic(det: pd.DataFrame, sto: pd.DataFrame, out: Path) -> pd.DataFrame | None:
+def stochastic(det: pd.DataFrame, sto: pd.DataFrame, out: Path, tight: bool = False) -> pd.DataFrame | None:
     if sto.empty or det.empty:
         return None
+    # compare like with like: tight det GNE (gne_fixed in tight mode) vs stochastic
+    # gne_tight; default-tolerance det GNE vs default-tolerance stochastic gne
     d = det[(det.agent == 'TOTAL') & det.kind.isin(['ind_fixed', 'gne_fixed'])]
     d = d.assign(kind=d.kind.map({'ind_fixed': 'ind_det', 'gne_fixed': 'gne_det'}))
-    s = sto[sto.agent == 'TOTAL']
-    s = s.assign(kind=s.kind.map({'ind': 'ind_stoch', 'gne': 'gne_stoch'}))
+    s = sto[(sto.agent == 'TOTAL') & sto.kind.isin(['ind', 'gne_tight' if tight else 'gne'])]
+    s = s.assign(kind=s.kind.map({'ind': 'ind_stoch', 'gne': 'gne_stoch', 'gne_tight': 'gne_stoch'}))
     T = pd.concat([d, s]).pivot_table(index='week', columns='kind', values=['net_profit', 'curtail_kwh'])
     T = T.loc[T.index.isin(s.week.unique())]
     T.to_csv(out / 'stoch_vs_det.csv')
@@ -289,7 +296,11 @@ def summary(out: Path, wk, e4, st) -> None:
               f"- Curtailment avoided: median {s['curtail_reduction_kwh']['p50']:,.0f} kWh/week",
               f"- H2 change (GNE − individual): median {s['h2_change_kg']['p50']:+,.0f} kg/week",
               f"- GNE vs central planner: median {s['gap_central_pct']['p50']:+.1f}% "
-              f"(5–95%: {s['gap_central_pct']['p5']:+.1f}% to {s['gap_central_pct']['p95']:+.1f}%)", '',
+              f"(5–95%: {s['gap_central_pct']['p5']:+.1f}% to {s['gap_central_pct']['p95']:+.1f}%)"]
+        if 'loose_minus_tight' in s:
+            L += [f"- GNE with the default ADMM tolerance (tol=1, stops early) minus tight GNE: "
+                  f"median {f(s['loose_minus_tight'])} $/week"]
+        L += ['',
               '![](fig1_weekly_gain.png)', '', '![](fig2_gain_by_week.png)', '', '![](fig5_central_gap.png)', '',
               '### Per-agent gain (GNE − fair individual), $/week', '',
               wk['per_agent'].round(1).to_markdown(), '']
@@ -312,15 +323,23 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('root')
     ap.add_argument('--out', default=None)
+    ap.add_argument('--gne', choices=['loose', 'tight'], default='loose',
+                    help="'tight': use the GNE runs with ADMM tol 1e-3 (gne_tight/, e4_tight/); "
+                         "the default-tolerance GNE stays in the tables as gne_loose")
     a = ap.parse_args(argv)
     root = Path(a.root)
-    out = Path(a.out) if a.out else root / 'analysis'
+    out = Path(a.out) if a.out else root / ('analysis' if a.gne == 'loose' else 'analysis_tight')
     out.mkdir(parents=True, exist_ok=True)
     det, e4df, sto = (load_family(root, f) for f in ('all_weeks', 'e4', 'stoch_weeks'))
+    if a.gne == 'tight':
+        gt, e4t = load_family(root, 'gne_tight'), load_family(root, 'e4_tight')
+        det = pd.concat([det.assign(kind=det.kind.replace({'gne_fixed': 'gne_loose'})),
+                         gt.assign(kind='gne_fixed')])
+        e4df = e4t.assign(kind=e4t.kind.str.replace('tcoal_', 'coal_', regex=False))
     pd.concat([det, e4df, sto]).to_csv(out / 'runs_long.csv', index=False)
     wk = weekly(det, out) if not det.empty else None
     co = coalitions(e4df, out) if not e4df.empty else None
-    st = stochastic(det, sto, out)
+    st = stochastic(det, sto, out, tight=(a.gne == 'tight'))
     summary(out, wk, co, st)
     print(f'wrote {out}')
 
