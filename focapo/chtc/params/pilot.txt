@@ -1,0 +1,3 @@
+pilot_ind_noise, --scenario individual --n-days 1
+pilot_gne_xgb, --scenario gne --baseline fixed --commit-mode admm --forecaster xgb --n-days 1
+pilot_ind_xgb_S10, --scenario individual --baseline fixed --forecaster xgb --scenarios 10 --n-days 1

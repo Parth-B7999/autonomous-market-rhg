@@ -34,3 +34,7 @@ CLAUDE_CODE_CHTC_PROMPT.md
 
 # Trained forecaster models (rebuild with forecaster/train.py)
 forecaster/models/
+
+# CHTC job bundle (rebuild with chtc/make_bundle.sh)
+chtc/bundle.tar.gz
+*.tar.gz

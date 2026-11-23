@@ -1,0 +1,18 @@
+# One job per line of $(PARAMS): "<name>, <run_experiment args>"
+#   condor_submit job.sub PARAMS=params/<batch>.txt BATCH=<batch>
+universe        = container
+container_image = file:///staging/p/prbrahmbhatt/focapo.sif
+requirements    = (HasCHTCStaging == true)
+executable      = run_job.sh
+arguments       = $(name) $(args)
+transfer_input_files    = bundle.tar.gz
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_remaps  = "$(name).tar.gz = results/$(BATCH)/$(name).tar.gz"
+request_cpus    = 2
+request_memory  = 4GB
+request_disk    = 3GB
+log    = logs/$(BATCH)/$(name).log
+output = logs/$(BATCH)/$(name).out
+error  = logs/$(BATCH)/$(name).err
+queue name, args from $(PARAMS)

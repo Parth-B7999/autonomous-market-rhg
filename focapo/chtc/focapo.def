@@ -2,6 +2,7 @@ Bootstrap: docker
 From: python:3.11-slim
 
 %post
+    apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
     # versions match the laptop env used for Phase A/B runs
     pip install --no-cache-dir \
         numpy==1.26.4 \
@@ -17,6 +18,9 @@ From: python:3.11-slim
 
 %test
     python -c "import numpy, pandas, scipy, matplotlib, gurobipy; print('gurobi', gurobipy.gurobi.version())"
+
+%environment
+    export OMP_NUM_THREADS=1
 
 %labels
     Purpose FOCAPO-CPC 2027 talk experiments (HTCondor jobs)
